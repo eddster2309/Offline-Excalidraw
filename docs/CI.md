@@ -36,6 +36,7 @@ Optional:
 
 - `UPSTREAM_REF`, `LIBRARIES_REF`: branch/tag/sha to test instead of the pinned commits (drift job only).
 - `PLAYWRIGHT_DOWNLOAD_HOST`: where `playwright install` fetches Chromium from (see below).
+- `VITEST_MAX_WORKERS`: unit test workers. `.gitlab-ci.yml` sets `4` because the runner pods have no CPU limit and see every core of a shared node (one worker per core made tests time out). Unset, `ci-test.sh` uses the container's CPU quota, else `nproc`.
 
 The registry cache and image repository need no setup: the job token pushes to the project's own registry.
 
