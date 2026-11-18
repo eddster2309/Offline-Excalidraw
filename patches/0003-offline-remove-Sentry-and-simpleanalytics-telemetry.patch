@@ -1,0 +1,437 @@
+From b40f3ae36f33ed939d10e51a26a64f2a08803893 Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 17:57:00 +1100
+Subject: [PATCH 3/9] offline: remove Sentry and simpleanalytics telemetry
+
+---
+ .env.development                              |  2 +-
+ excalidraw-app/bug-issue-template.js          | 11 ---
+ .../components/TopErrorBoundary.tsx           | 48 +---------
+ excalidraw-app/index.html                     | 34 -------
+ excalidraw-app/index.tsx                      |  2 -
+ excalidraw-app/package.json                   |  6 +-
+ excalidraw-app/sentry.ts                      | 94 -------------------
+ excalidraw-app/vite-env.d.ts                  |  2 -
+ packages/excalidraw/vite-env.d.ts             |  1 -
+ public/404.html                               | 10 --
+ yarn.lock                                     | 51 ----------
+ 11 files changed, 7 insertions(+), 254 deletions(-)
+ delete mode 100644 excalidraw-app/bug-issue-template.js
+ delete mode 100644 excalidraw-app/sentry.ts
+
+diff --git a/.env.development b/.env.development
+index 24f1756e6..8de909ae5 100644
+--- a/.env.development
++++ b/.env.development
+@@ -14,7 +14,7 @@ VITE_APP_AI_BACKEND=http://localhost:3016
+ # whether to disable live reload / HMR. Usuaully what you want to do when
+ # debugging Service Workers.
+ VITE_APP_DEV_DISABLE_LIVE_RELOAD=
+-VITE_APP_ENABLE_TRACKING=true
++VITE_APP_ENABLE_TRACKING=false
+ 
+ FAST_REFRESH=false
+ 
+diff --git a/excalidraw-app/bug-issue-template.js b/excalidraw-app/bug-issue-template.js
+deleted file mode 100644
+index bc048864f..000000000
+--- a/excalidraw-app/bug-issue-template.js
++++ /dev/null
+@@ -1,11 +0,0 @@
+-export default (sentryErrorId) => `
+-### Scene content
+-
+-\`\`\`
+-Paste scene content here
+-\`\`\`
+-
+-### Sentry Error ID
+-
+-${sentryErrorId}
+-`;
+diff --git a/excalidraw-app/components/TopErrorBoundary.tsx b/excalidraw-app/components/TopErrorBoundary.tsx
+index 77d9e5f4f..a948ea570 100644
+--- a/excalidraw-app/components/TopErrorBoundary.tsx
++++ b/excalidraw-app/components/TopErrorBoundary.tsx
+@@ -1,11 +1,9 @@
+ import Trans from "@excalidraw/excalidraw/components/Trans";
+ import { t } from "@excalidraw/excalidraw/i18n";
+-import * as Sentry from "@sentry/browser";
+ import React from "react";
+ 
+ interface TopErrorBoundaryState {
+   hasError: boolean;
+-  sentryEventId: string;
+   localStorage: string;
+ }
+ 
+@@ -15,7 +13,6 @@ export class TopErrorBoundary extends React.Component<
+ > {
+   state: TopErrorBoundaryState = {
+     hasError: false,
+-    sentryEventId: "",
+     localStorage: "",
+   };
+ 
+@@ -33,15 +30,11 @@ export class TopErrorBoundary extends React.Component<
+       }
+     }
+ 
+-    Sentry.withScope((scope) => {
+-      scope.setExtras(errorInfo);
+-      const eventId = Sentry.captureException(error);
++    console.error(error, errorInfo);
+ 
+-      this.setState((state) => ({
+-        hasError: true,
+-        sentryEventId: eventId,
+-        localStorage: JSON.stringify(_localStorage),
+-      }));
++    this.setState({
++      hasError: true,
++      localStorage: JSON.stringify(_localStorage),
+     });
+   }
+ 
+@@ -52,26 +45,6 @@ export class TopErrorBoundary extends React.Component<
+     }
+   }
+ 
+-  private async createGithubIssue() {
+-    let body = "";
+-    try {
+-      const templateStrFn = (
+-        await import(
+-          /* webpackChunkName: "bug-issue-template" */ "../bug-issue-template"
+-        )
+-      ).default;
+-      body = encodeURIComponent(templateStrFn(this.state.sentryEventId));
+-    } catch (error: any) {
+-      console.error(error);
+-    }
+-
+-    window.open(
+-      `https://github.com/excalidraw/excalidraw/issues/new?body=${body}`,
+-      "_blank",
+-      "noopener noreferrer",
+-    );
+-  }
+-
+   private errorSplash() {
+     return (
+       <div className="ErrorSplash excalidraw">
+@@ -114,19 +87,6 @@ export class TopErrorBoundary extends React.Component<
+             </div>
+           </div>
+           <div>
+-            <div className="ErrorSplash-paragraph">
+-              {t("errorSplash.trackedToSentry", {
+-                eventId: this.state.sentryEventId,
+-              })}
+-            </div>
+-            <div className="ErrorSplash-paragraph">
+-              <Trans
+-                i18nKey="errorSplash.openIssueMessage"
+-                button={(el) => (
+-                  <button onClick={() => this.createGithubIssue()}>{el}</button>
+-                )}
+-              />
+-            </div>
+             <div className="ErrorSplash-paragraph">
+               <div className="ErrorSplash-details">
+                 <label>{t("errorSplash.sceneContent")}</label>
+diff --git a/excalidraw-app/index.html b/excalidraw-app/index.html
+index 63eeba882..4d0852919 100644
+--- a/excalidraw-app/index.html
++++ b/excalidraw-app/index.html
+@@ -211,39 +211,5 @@
+     </header>
+     <div id="root"></div>
+     <script type="module" src="index.tsx"></script>
+-    <% if (typeof PROD != 'undefined' && PROD == true) { %>
+-    <!-- 100% privacy friendly analytics -->
+-    <script>
+-      // need to load this script dynamically bcs. of iframe embed tracking
+-      var scriptEle = document.createElement("script");
+-      scriptEle.setAttribute(
+-        "src",
+-        "https://scripts.simpleanalyticscdn.com/latest.js",
+-      );
+-      scriptEle.setAttribute("type", "text/javascript");
+-      scriptEle.setAttribute("defer", true);
+-      scriptEle.setAttribute("async", true);
+-      // if iframe
+-      if (window.self !== window.top) {
+-        scriptEle.setAttribute("data-auto-collect", true);
+-      }
+-
+-      document.body.appendChild(scriptEle);
+-
+-      // if iframe
+-      if (window.self !== window.top) {
+-        scriptEle.addEventListener("load", () => {
+-          if (window.sa_pageview) {
+-            window.window.sa_event(action, {
+-              category: "iframe",
+-              label: "embed",
+-              value: window.location.pathname,
+-            });
+-          }
+-        });
+-      }
+-    </script>
+-    <!-- end LEGACY GOOGLE ANALYTICS -->
+-    <% } %>
+   </body>
+ </html>
+diff --git a/excalidraw-app/index.tsx b/excalidraw-app/index.tsx
+index b7db2ca20..b3c27488e 100644
+--- a/excalidraw-app/index.tsx
++++ b/excalidraw-app/index.tsx
+@@ -2,8 +2,6 @@ import { StrictMode } from "react";
+ import { createRoot } from "react-dom/client";
+ import { registerSW } from "virtual:pwa-register";
+ 
+-import "../excalidraw-app/sentry";
+-
+ import ExcalidrawApp from "./App";
+ 
+ // the entry's JavaScript and CSS loaded and ran (`scripts/stats/perf.mjs`)
+diff --git a/excalidraw-app/package.json b/excalidraw-app/package.json
+index f779a8c10..100c2a369 100644
+--- a/excalidraw-app/package.json
++++ b/excalidraw-app/package.json
+@@ -27,8 +27,6 @@
+   },
+   "dependencies": {
+     "@excalidraw/random-username": "1.0.0",
+-    "@sentry/browser": "9.0.1",
+-    "callsites": "4.2.0",
+     "i18next-browser-languagedetector": "6.1.4",
+     "idb-keyval": "6.0.3",
+     "jotai": "2.11.0",
+@@ -41,8 +39,8 @@
+   "prettier": "@excalidraw/prettier-config",
+   "scripts": {
+     "build-node": "node ./scripts/build-node.js",
+-    "build:app:docker": "cross-env VITE_APP_DISABLE_SENTRY=true vite build",
+-    "build:app": "cross-env VITE_APP_GIT_SHA=$VERCEL_GIT_COMMIT_SHA cross-env VITE_APP_ENABLE_TRACKING=true vite build",
++    "build:app:docker": "vite build",
++    "build:app": "cross-env VITE_APP_ENABLE_TRACKING=false vite build",
+     "build:version": "node ../scripts/build-version.js",
+     "build": "yarn build:app && yarn build:version",
+     "start": "yarn && vite",
+diff --git a/excalidraw-app/sentry.ts b/excalidraw-app/sentry.ts
+deleted file mode 100644
+index 58e34bba5..000000000
+--- a/excalidraw-app/sentry.ts
++++ /dev/null
+@@ -1,94 +0,0 @@
+-import { getFeatureFlag } from "@excalidraw/common";
+-import * as Sentry from "@sentry/browser";
+-import callsites from "callsites";
+-
+-const SentryEnvHostnameMap: { [key: string]: string } = {
+-  "excalidraw.com": "production",
+-  "staging.excalidraw.com": "staging",
+-  "vercel.app": "staging",
+-};
+-
+-const SENTRY_DISABLED = import.meta.env.VITE_APP_DISABLE_SENTRY === "true";
+-
+-// Disable Sentry locally or inside the Docker to avoid noise/respect privacy
+-const onlineEnv =
+-  !SENTRY_DISABLED &&
+-  Object.keys(SentryEnvHostnameMap).find(
+-    (item) => window.location.hostname.indexOf(item) >= 0,
+-  );
+-
+-Sentry.init({
+-  dsn: onlineEnv
+-    ? "https://7bfc596a5bf945eda6b660d3015a5460@sentry.io/5179260"
+-    : undefined,
+-  environment: onlineEnv ? SentryEnvHostnameMap[onlineEnv] : undefined,
+-  release: import.meta.env.VITE_APP_GIT_SHA,
+-  ignoreErrors: [
+-    "undefined is not an object (evaluating 'window.__pad.performLoop')", // Only happens on Safari, but spams our servers. Doesn't break anything
+-    "InvalidStateError: Failed to execute 'transaction' on 'IDBDatabase': The database connection is closing.", // Not much we can do about the IndexedDB closing error
+-    /(Failed to fetch|(fetch|loading) dynamically imported module)/i, // This is happening when a service worker tries to load an old asset
+-    /QuotaExceededError: (The quota has been exceeded|.*setItem.*Storage)/i, // localStorage quota exceeded
+-    "Internal error opening backing store for indexedDB.open", // Private mode and disabled indexedDB
+-  ],
+-  integrations: [
+-    Sentry.captureConsoleIntegration({
+-      levels: ["error"],
+-    }),
+-    Sentry.featureFlagsIntegration(),
+-  ],
+-  beforeSend(event) {
+-    if (event.request?.url) {
+-      event.request.url = event.request.url.replace(/#.*$/, "");
+-    }
+-
+-    if (!event.exception) {
+-      event.exception = {
+-        values: [
+-          {
+-            type: "ConsoleError",
+-            value: event.message ?? "Unknown error",
+-            stacktrace: {
+-              frames: callsites()
+-                .slice(1)
+-                .filter(
+-                  (frame) =>
+-                    frame.getFileName() &&
+-                    !frame.getFileName()?.includes("@sentry_browser.js"),
+-                )
+-                .map((frame) => ({
+-                  filename: frame.getFileName() ?? undefined,
+-                  function: frame.getFunctionName() ?? undefined,
+-                  in_app: !(
+-                    frame.getFileName()?.includes("node_modules") ?? false
+-                  ),
+-                  lineno: frame.getLineNumber() ?? undefined,
+-                  colno: frame.getColumnNumber() ?? undefined,
+-                })),
+-            },
+-            mechanism: {
+-              type: "instrument",
+-              handled: true,
+-              data: {
+-                function: "console.error",
+-                handler: "Sentry.beforeSend",
+-              },
+-            },
+-          },
+-        ],
+-      };
+-    }
+-
+-    return event;
+-  },
+-});
+-
+-const flagsIntegration =
+-  Sentry.getClient()?.getIntegrationByName<Sentry.FeatureFlagsIntegration>(
+-    "FeatureFlags",
+-  );
+-if (flagsIntegration) {
+-  flagsIntegration.addFeatureFlag(
+-    "COMPLEX_BINDINGS",
+-    getFeatureFlag("COMPLEX_BINDINGS"),
+-  );
+-}
+diff --git a/excalidraw-app/vite-env.d.ts b/excalidraw-app/vite-env.d.ts
+index 32d6e67b7..aac6d5e91 100644
+--- a/excalidraw-app/vite-env.d.ts
++++ b/excalidraw-app/vite-env.d.ts
+@@ -13,8 +13,6 @@ interface ImportMetaEnv {
+   // debugging Service Workers.
+   VITE_APP_DEV_DISABLE_LIVE_RELOAD: string;
+ 
+-  VITE_APP_DISABLE_SENTRY: string;
+-
+   // Set this flag to false if you want to open the overlay by default
+   VITE_APP_COLLAPSE_OVERLAY: string;
+ 
+diff --git a/packages/excalidraw/vite-env.d.ts b/packages/excalidraw/vite-env.d.ts
+index 2a9913257..0f161faaf 100644
+--- a/packages/excalidraw/vite-env.d.ts
++++ b/packages/excalidraw/vite-env.d.ts
+@@ -28,7 +28,6 @@ interface ImportMetaEnv {
+ 
+   //Debug flags
+ 
+-  VITE_APP_DISABLE_SENTRY: string;
+   // Set this flag to false if you want to open the overlay by default
+   VITE_APP_COLLAPSE_OVERLAY: string;
+   // Enable eslint in dev server
+diff --git a/public/404.html b/public/404.html
+index d064e992a..95e317c96 100644
+--- a/public/404.html
++++ b/public/404.html
+@@ -337,15 +337,5 @@
+         <a href="https://github.com/excalidraw/cli">CLI</a>
+       </nav>
+     </main>
+-    <!-- 100% privacy friendly analytics (same as the editor) -->
+-    <script>
+-      // only on excalidraw.com, not on previews or self-hosted builds
+-      if (window.location.hostname === "excalidraw.com") {
+-        var scriptEle = document.createElement("script");
+-        scriptEle.src = "https://scripts.simpleanalyticscdn.com/latest.js";
+-        scriptEle.async = true;
+-        document.body.appendChild(scriptEle);
+-      }
+-    </script>
+   </body>
+ </html>
+diff --git a/yarn.lock b/yarn.lock
+index 6b2e8219b..493e9b24a 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -2643,52 +2643,6 @@
+   resolved "https://registry.yarnpkg.com/@rushstack/eslint-patch/-/eslint-patch-1.10.5.tgz#3a1c12c959010a55c17d46b395ed3047b545c246"
+   integrity sha512-kkKUDVlII2DQiKy7UstOR1ErJP8kUKAQ4oa+SQtM0K+lPdmmjj0YnnxBgtTVYH7mUKtbsxeFC9y0AmK7Yb78/A==
+ 
+-"@sentry-internal/browser-utils@9.0.1":
+-  version "9.0.1"
+-  resolved "https://registry.yarnpkg.com/@sentry-internal/browser-utils/-/browser-utils-9.0.1.tgz#c8edf0b0af7c4e7f1cca46cf5c523453c0de6568"
+-  integrity sha512-/2karfYpQFtnkFrWxQgi/DuOf83OGhIdJcEmRDYDZKvj3mGHQ6n7fzIFD8fc0hPupBA/xi2kHVu7DX7scx5Fbw==
+-  dependencies:
+-    "@sentry/core" "9.0.1"
+-
+-"@sentry-internal/feedback@9.0.1":
+-  version "9.0.1"
+-  resolved "https://registry.yarnpkg.com/@sentry-internal/feedback/-/feedback-9.0.1.tgz#1403b09bb1790e90a3fdade7a0d4b55efacffa29"
+-  integrity sha512-U43WMmhTXx9+wtXaJRnfoFfHz2Zv9fIEWDinYZQ03yGhjnAj3033Ca+mH+wMM0SQjF0KhGLG8Os4B/OGoQzB2g==
+-  dependencies:
+-    "@sentry/core" "9.0.1"
+-
+-"@sentry-internal/replay-canvas@9.0.1":
+-  version "9.0.1"
+-  resolved "https://registry.yarnpkg.com/@sentry-internal/replay-canvas/-/replay-canvas-9.0.1.tgz#c57a29b15550be98af856b040e741f252511ed99"
+-  integrity sha512-7PBCkqNZQjbAunQmfSRkMKqviQ+jOqB/dy0nvL/T7EaahoD7VzVCGAbL29cLkPmpP3a9dzYk7ALrUqKLApwhRg==
+-  dependencies:
+-    "@sentry-internal/replay" "9.0.1"
+-    "@sentry/core" "9.0.1"
+-
+-"@sentry-internal/replay@9.0.1":
+-  version "9.0.1"
+-  resolved "https://registry.yarnpkg.com/@sentry-internal/replay/-/replay-9.0.1.tgz#494f7a33fd78bceb31f6a205aac8c29a24663678"
+-  integrity sha512-QzHClQWOgTEjOiBaCoQMytTSyZUKo/F2SYnzeWF30qNHtOKZSXEUugOeF3Ph0wc47NdH/4qPjYZgbNEYARf2qw==
+-  dependencies:
+-    "@sentry-internal/browser-utils" "9.0.1"
+-    "@sentry/core" "9.0.1"
+-
+-"@sentry/browser@9.0.1":
+-  version "9.0.1"
+-  resolved "https://registry.yarnpkg.com/@sentry/browser/-/browser-9.0.1.tgz#b6066a24c52550141d71afaeca2d39ea9e9349b9"
+-  integrity sha512-alI1r1NyIARjzEm5493QuOPhiT2W1gelGDV30B1oL5cKo1arjqRLHp8Ny5odlTnyDTFC4EIx5Z69J+iyhW0CvQ==
+-  dependencies:
+-    "@sentry-internal/browser-utils" "9.0.1"
+-    "@sentry-internal/feedback" "9.0.1"
+-    "@sentry-internal/replay" "9.0.1"
+-    "@sentry-internal/replay-canvas" "9.0.1"
+-    "@sentry/core" "9.0.1"
+-
+-"@sentry/core@9.0.1":
+-  version "9.0.1"
+-  resolved "https://registry.yarnpkg.com/@sentry/core/-/core-9.0.1.tgz#da0207f7a4f74eb4af4ba26ad4244056968b3e41"
+-  integrity sha512-RQ3B3NfF+BdmQz1c+vj4OBO+kxvxSsYMcmCDxSEZ7YrS/6Er1kMy0fwfxmdZJMdM1LlzXmO0XWF2g1IO9CzKyQ==
+-
+ "@sinclair/typebox@^0.27.8":
+   version "0.27.8"
+   resolved "https://registry.yarnpkg.com/@sinclair/typebox/-/typebox-0.27.8.tgz#6667fac16c436b5434a387a34dedb013198f6e6e"
+@@ -3918,11 +3872,6 @@ call-bound@^1.0.2, call-bound@^1.0.3:
+     call-bind-apply-helpers "^1.0.1"
+     get-intrinsic "^1.2.6"
+ 
+-callsites@4.2.0:
+-  version "4.2.0"
+-  resolved "https://registry.yarnpkg.com/callsites/-/callsites-4.2.0.tgz#98761d5be3ce092e4b9c92f7fb8c8eb9b83cadc8"
+-  integrity sha512-kfzR4zzQtAE9PC7CzZsjl3aBNbXWuXiSeOCdLcPpBfGW8YuCqQHcRPFDbr/BPVmd3EEPVpuFzLyuT/cUhPr4OQ==
+-
+ callsites@^3.0.0:
+   version "3.1.0"
+   resolved "https://registry.yarnpkg.com/callsites/-/callsites-3.1.0.tgz#b3630abd8943432f54b3f0519238e33cd7df2f73"

@@ -1,0 +1,86 @@
+From f59c751c10a948467ef8b96f9bcf63872ddde7c3 Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 21:01:16 +1100
+Subject: [PATCH 3/3] offline: show the environment banner from /api/config
+
+The same strip as in the app, from the offline server's runtime config. With
+BANNER_MODE=sending it is hidden on the library site, which has no live
+collaboration sessions.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ script.js | 21 +++++++++++++++++++++
+ style.css | 24 +++++++++++++++++++++++-
+ 2 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/script.js b/script.js
+index 8c5540f..7dbf680 100644
+--- a/script.js
++++ b/script.js
+@@ -453,3 +453,24 @@ document.addEventListener("click", (event) => {
+     }
+   }
+ });
++
++// Environment banner (e.g. QA / PROD), configured on the offline server via
++// BANNER_TEXT / BANNER_COLOR / BANNER_TEXT_COLOR. Same look as in the app.
++// Hidden with BANNER_MODE=sending: this page sends nothing anywhere, and
++// that mode shows the banner only while the editor shares a live session.
++fetch("/api/config", { cache: "no-store" })
++  .then((res) => (res.ok ? res.json() : null))
++  .then((config) => {
++    const banner = config && config.banner;
++    if (!banner || !banner.text || banner.mode === "sending") {
++      return;
++    }
++    const el = document.createElement("div");
++    el.className = "environment-banner";
++    el.dataset.testid = "environment-banner";
++    el.textContent = banner.text;
++    el.style.backgroundColor = banner.color;
++    el.style.color = banner.textColor;
++    document.body.prepend(el);
++  })
++  .catch(() => {});
+diff --git a/style.css b/style.css
+index 594b545..0048387 100644
+--- a/style.css
++++ b/style.css
+@@ -17,6 +17,20 @@ nav {
+   position: sticky;
+ }
+ 
++.environment-banner {
++  height: 24px;
++  line-height: 24px;
++  padding: 0 8px;
++  font-size: 15px;
++  font-weight: 700;
++  letter-spacing: 0.04em;
++  text-align: center;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  user-select: none;
++}
++
+ :root {
+   --text: var(--oc-gray-7);
+   --muted: var(--oc-gray-6);
+@@ -59,7 +73,15 @@ footer {
+   flex-shrink: 0;
+ }
+ 
+-.theme--dark {
++/* The dark theme inverts the page, but not the environment banner, which
++   must keep its configured colours. The background is set to what the
++   inverted light background (--oc-gray-0) renders as. */
++.theme--dark,
++.theme--dark body {
++  background-color: #161718;
++}
++
++.theme--dark body > :not(.environment-banner) {
+   filter: invert(93%) hue-rotate(180deg);
+ }
+ 

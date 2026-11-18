@@ -1,0 +1,154 @@
+From 5243e55bb3a9b275f68430401c715b8114b5e56c Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 17:57:52 +1100
+Subject: [PATCH 4/9] offline: drop Excalidraw+ redirect, absolute meta urls
+ and sitemap plugin
+
+---
+ excalidraw-app/index.html      | 34 +++-------------------------------
+ excalidraw-app/package.json    |  3 ---
+ excalidraw-app/vite.config.mts |  9 ---------
+ public/robots.txt              |  2 --
+ yarn.lock                      |  5 -----
+ 5 files changed, 3 insertions(+), 50 deletions(-)
+
+diff --git a/excalidraw-app/index.html b/excalidraw-app/index.html
+index 4d0852919..068093b05 100644
+--- a/excalidraw-app/index.html
++++ b/excalidraw-app/index.html
+@@ -20,12 +20,11 @@
+       name="description"
+       content="Excalidraw is a virtual collaborative whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them."
+     />
+-    <meta name="image" content="https://excalidraw.com/og-image-3.png" />
++    <meta name="image" content="/og-image-3.png" />
+ 
+     <!-- Open Graph / Facebook -->
+     <meta property="og:site_name" content="Excalidraw" />
+     <meta property="og:type" content="website" />
+-    <meta property="og:url" content="https://excalidraw.com" />
+     <meta
+       property="og:title"
+       content="Excalidraw — Collaborative whiteboarding made easy"
+@@ -35,12 +34,10 @@
+       property="og:description"
+       content="Excalidraw is a virtual collaborative whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them."
+     />
+-    <meta property="og:image" content="https://excalidraw.com/og-image-3.png" />
++    <meta property="og:image" content="/og-image-3.png" />
+ 
+     <!-- Twitter -->
+     <meta property="twitter:card" content="summary_large_image" />
+-    <meta property="twitter:site" content="@excalidraw" />
+-    <meta property="twitter:url" content="https://excalidraw.com" />
+     <meta
+       property="twitter:title"
+       content="Excalidraw — Collaborative whiteboarding made easy"
+@@ -49,12 +46,7 @@
+       property="twitter:description"
+       content="Excalidraw is a virtual collaborative whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them."
+     />
+-    <meta
+-      property="twitter:image"
+-      content="https://excalidraw.com/og-image-3.png"
+-    />
+-
+-    <link rel="canonical" href="https://excalidraw.com" />
++    <meta property="twitter:image" content="/og-image-3.png" />
+ 
+     <!------------------------------------------------------------------------->
+     <!--   to minimize white flash on load when user has dark mode enabled   -->
+@@ -92,28 +84,8 @@
+       }
+     </style>
+ 
+-
+     <!------------------------------------------------------------------------->
+     <% if (typeof PROD != 'undefined' && PROD == true) { %>
+-    <script>
+-      // Redirect Excalidraw+ users which have auto-redirect enabled.
+-      //
+-      // Redirect only the bare root path, so link/room/library urls are not
+-      // redirected.
+-      //
+-      // Putting into index.html for best performance (can't redirect on server
+-      // due to location.hash checks).
+-      if (
+-        window.location.pathname === "/" &&
+-        !window.location.hash &&
+-        !window.location.search &&
+-        // if its present redirect
+-        document.cookie.includes("excplus-autoredirect=true")
+-      ) {
+-        window.location.href = "https://app.excalidraw.com";
+-      }
+-    </script>
+-
+     <!-- Following placeholder is replaced during the build step -->
+     <!-- PLACEHOLDER:EXCALIDRAW_APP_FONTS -->
+ 
+diff --git a/excalidraw-app/package.json b/excalidraw-app/package.json
+index 100c2a369..e1b22a708 100644
+--- a/excalidraw-app/package.json
++++ b/excalidraw-app/package.json
+@@ -47,8 +47,5 @@
+     "start:production": "yarn build && yarn serve",
+     "serve": "npx http-server build -a localhost -p 5001 -o",
+     "build:preview": "yarn build && vite preview --port 5000"
+-  },
+-  "devDependencies": {
+-    "vite-plugin-sitemap": "0.7.1"
+   }
+ }
+diff --git a/excalidraw-app/vite.config.mts b/excalidraw-app/vite.config.mts
+index 8f6094f2a..7ec147bc8 100644
+--- a/excalidraw-app/vite.config.mts
++++ b/excalidraw-app/vite.config.mts
+@@ -6,7 +6,6 @@ import { ViteEjsPlugin } from "vite-plugin-ejs";
+ import { VitePWA } from "vite-plugin-pwa";
+ import checker from "vite-plugin-checker";
+ import { createHtmlPlugin } from "vite-plugin-html";
+-import Sitemap from "vite-plugin-sitemap";
+ import { woff2BrowserPlugin } from "../scripts/woff2/woff2-vite-plugins";
+ 
+ import { APP_ROUTES } from "./app_routes";
+@@ -279,14 +278,6 @@ export default defineConfig(({ mode }) => {
+       assetsInlineLimit: 0,
+     },
+     plugins: [
+-      Sitemap({
+-        hostname: "https://excalidraw.com",
+-        outDir: "build",
+-        exclude: ["/404"],
+-        changefreq: "monthly",
+-        // its static in public folder
+-        generateRobotsTxt: false,
+-      }),
+       woff2BrowserPlugin(),
+       lazyChunksPlugin(
+         /[\\/]node_modules[\\/]@excalidraw[\\/]mermaid-to-excalidraw[\\/]/,
+diff --git a/public/robots.txt b/public/robots.txt
+index fc99f2094..c2a49f4fb 100644
+--- a/public/robots.txt
++++ b/public/robots.txt
+@@ -1,4 +1,2 @@
+ User-agent: *
+ Allow: /
+-
+-Sitemap: https://excalidraw.com/sitemap.xml
+diff --git a/yarn.lock b/yarn.lock
+index 493e9b24a..78060b4db 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -8810,11 +8810,6 @@ vite-plugin-pwa@0.21.1:
+     workbox-build "^7.3.0"
+     workbox-window "^7.3.0"
+ 
+-vite-plugin-sitemap@0.7.1:
+-  version "0.7.1"
+-  resolved "https://registry.yarnpkg.com/vite-plugin-sitemap/-/vite-plugin-sitemap-0.7.1.tgz#3b3cf6d2e067ec835f810e5eaaacf05485c819fe"
+-  integrity sha512-4NRTkiWytLuAmcikckrLcLl9iYA20+5v6l8XshcOrzxH1WR8H0O3S6sTQYfjMrE8su/LG6Y0cTodvOdcOIxaLw==
+-
+ vite-plugin-svgr@4.2.0:
+   version "4.2.0"
+   resolved "https://registry.yarnpkg.com/vite-plugin-svgr/-/vite-plugin-svgr-4.2.0.tgz#9f3bf5206b0ec510287e56d16f1915e729bb4e6b"

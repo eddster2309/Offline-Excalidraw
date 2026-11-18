@@ -1,0 +1,183 @@
+From 1cbedabfdc2db5b180244ae6b73737a43b5c2a4a Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 18:22:49 +1100
+Subject: [PATCH 2/3] offline: same-origin install flow, escape catalog
+ strings, no external links
+
+- libraries are handed to the editor as absolute same-origin URLs
+  (<origin>/libraries/libraries/<author>/<file>.excalidrawlib)
+- the referrer defaults to the app root and is restricted to this origin
+- catalog strings are HTML-escaped (the catalog is publishable offline)
+- external author links are shown as text
+- the `target` parameter (editor window name) is restricted to [A-Za-z0-9_-]
+  (upstream escaped then decoded it: reflected XSS on the app origin)
+---
+ script.js | 100 ++++++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 64 insertions(+), 36 deletions(-)
+
+diff --git a/script.js b/script.js
+index 7de6b11..8c5540f 100644
+--- a/script.js
++++ b/script.js
+@@ -113,21 +113,47 @@ const sortBy = {
+ };
+ 
+ // -----------------------------------------------------------------------------
+-const APP_NAMES = {
+-  "Excalidraw+": "https://app.excalidraw.com",
+-  Excalidraw: "https://excalidraw.com",
+-  Excalideck: "https://app.excalideck.com",
++// Offline build: the site is served from <app origin>/libraries/ and the
++// editor lives at the app origin (one level up). Only same-origin referrers are
++// honoured so the "Add to Excalidraw" link can never navigate off-origin.
++const APP_NAME = "Excalidraw";
++const DEFAULT_REFERRER = new URL("../", location.href).href;
++
++const getReferrer = (searchParams) => {
++  const requested = searchParams.get("referrer");
++  if (requested) {
++    try {
++      const url = new URL(requested, location.href);
++      if (url.origin === location.origin) {
++        return url.href;
++      }
++    } catch (e) {}
++  }
++  return DEFAULT_REFERRER;
+ };
+ 
+-let appName = "";
++// libraries.json is user-publishable offline, so never trust its strings as HTML
++const escapeHTML = (str) =>
++  String(str ?? "").replace(
++    /[&<>"']/g,
++    (char) =>
++      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
++        char
++      ],
++  );
+ 
+-const getAppName = (referrer) => {
+-  return (appName =
+-    appName ||
+-    Object.entries(APP_NAMES).find(([appName, domain]) => {
+-      return referrer.includes(domain);
+-    })?.[0] ||
+-    "Excalidraw");
++// only same-origin author links stay clickable (an air-gapped browser cannot
++// reach external sites); anything else is shown as plain text
++const renderAuthor = (author) => {
++  const label = `@${escapeHTML(author.name)}`;
++  try {
++    const url = new URL(author.url, location.href);
++    if (author.url && url.origin === location.origin) {
++      return `<a href="${escapeHTML(url.href)}" target="_blank">${label}</a> `;
++    }
++  } catch (e) {}
++  const title = author.url ? ` title="${escapeHTML(author.url)}"` : "";
++  return `<span class="author"${title}>${label}</span> `;
+ };
+ // -----------------------------------------------------------------------------
+ 
+@@ -208,13 +234,15 @@ const populateLibraryList = (filterQuery = "") => {
+   }
+   const template = document.getElementById("template");
+   const searchParams = new URLSearchParams(location.search);
+-  const referrer = escapeHTMLAttribute(
+-    searchParams.get("referrer") || "https://excalidraw.com",
+-  );
+-  const appName = getAppName(referrer);
+-  const target = decodeURIComponent(
+-    escapeHTMLAttribute(searchParams.get("target")) || "_blank",
+-  );
++  const referrer = escapeHTMLAttribute(getReferrer(searchParams));
++  const appName = APP_NAME;
++  // window name of the editor tab (e.g. "_excalidraw"). Upstream decoded the
++  // parameter after escaping it, which re-opened HTML injection on the app's
++  // origin: accept only names that cannot leave the attribute.
++  const requestedTarget = searchParams.get("target") || "";
++  const target = /^[A-Za-z0-9_-]{1,64}$/.test(requestedTarget)
++    ? requestedTarget
++    : "_blank";
+   const useHash = searchParams.get("useHash");
+   const csrfToken = escapeHTMLAttribute(searchParams.get("token"));
+   for (let library of libraries) {
+@@ -224,8 +252,8 @@ const populateLibraryList = (filterQuery = "") => {
+     let inner = template.innerHTML;
+     const source = `libraries/${library.source}`;
+     let authorsInnerHTML = "";
+-    inner = inner.replace(/\{libraryId\}/g, library.id);
+-    inner = inner.replace(/\{name\}/g, library.name);
++    inner = inner.replace(/\{libraryId\}/g, escapeHTML(library.id));
++    inner = inner.replace(/\{name\}/g, escapeHTML(library.name));
+ 
+     const truncate = (str) => {
+       if (str.length > 300) {
+@@ -235,22 +263,22 @@ const populateLibraryList = (filterQuery = "") => {
+       return str;
+     };
+ 
+-    let description = library.description || "";
++    let description = escapeHTML(library.description || "");
+     if (library.itemNames) {
+-      description += `<br/><br/><b>Items: </b> <span className="itemNames">${truncate(
+-        library.itemNames.join(", "),
++      description += `<br/><br/><b>Items: </b> <span className="itemNames">${escapeHTML(
++        truncate(library.itemNames.join(", ")),
+       )}</span>`;
+     }
+     inner = inner.replace(/\{description\}/g, description);
+ 
+-    inner = inner.replace(/\{source\}/g, source);
++    inner = inner.replace(/\{source\}/g, escapeHTML(source));
+     for (let author of library.authors) {
+-      authorsInnerHTML += `<a href="${author.url}" target="_blank">@${author.name}</a> `;
++      authorsInnerHTML += renderAuthor(author);
+     }
+     inner = inner.replace(/\{authors\}/g, authorsInnerHTML);
+     inner = inner.replace(
+       /\{preview\}/g,
+-      `libraries/${library.preview}?v=${library.updated || 0}`,
++      escapeHTML(`libraries/${library.preview}?v=${library.updated || 0}`),
+     );
+     inner = inner.replace(/\{created\}/g, getDate(library.created));
+     if (library.created !== library.updated) {
+@@ -259,9 +287,9 @@ const populateLibraryList = (filterQuery = "") => {
+       inner = inner.replace('<p class="updated">Updated: {updated}</p>', "");
+     }
+     inner = inner.replace(/\{appName\}/g, appName);
+-    const libraryUrl = encodeURIComponent(
+-      `${escapeHTMLAttribute(origin)}/${source}`,
+-    );
++    // absolute same-origin URL of the .excalidrawlib file, e.g.
++    // http://host/libraries/libraries/<author>/<file>.excalidrawlib
++    const libraryUrl = encodeURIComponent(new URL(source, location.href).href);
+     inner = inner.replace(
+       "{addToLib}",
+       `${referrer}${useHash ? "#" : "?"}addLibrary=${libraryUrl}${
+@@ -399,6 +427,9 @@ fetchJSONFile("libraries.json", (libraries) => {
+   });
+ });
+ 
++// link the intro to the editor
++document.getElementById("app-link").href = getReferrer(urlParams);
++
+ // update footer with current year
+ const footer = document.getElementById("footer");
+ footer.innerHTML = footer.innerHTML.replace(/{currentYear}/g, () =>
+@@ -416,12 +447,9 @@ document.addEventListener("click", (event) => {
+     const referrerVersion = parseInt(urlParams.get("version") || "1");
+ 
+     if (referrer && referrerVersion < libraryVersion) {
+-      let message =
+-        "It seems the Excalidraw editor's version is older than the library version. Installing this library may not work correctly.";
+-      if (referrer.includes("excalidraw.com")) {
+-        message += `\n\nTo ensure you are on the latest version, hard-reload the excalidraw.com tab (Mac: Cmd-Shift-R, Window: Ctrl-F5). If that doesn't work, ensure you only have a single excalidraw.com tab open.`;
+-      }
+-      window.alert(message);
++      window.alert(
++        "It seems the Excalidraw editor's version is older than the library version. Installing this library may not work correctly.",
++      );
+     }
+   }
+ });

@@ -1,0 +1,1060 @@
+From 765b65856276d9f5170c2adcb42b5c5f34d7ced8 Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 20:57:38 +1100
+Subject: [PATCH 9/9] offline: runtime config from /api/config (banner,
+ username, persistence, share note, collaboration)
+
+The offline server serves GET /api/config; the app loads it once before the
+first render (defaults on any failure, so older servers keep working):
+
+- environment banner (text/color; BANNER_MODE=sending shows it only while a
+  live collaboration session is active), rendered above the editor
+- username forced by a reverse-proxy header (optionally locked)
+- DISABLE_PERSISTENCE: no scene/share-link storage, share-link export and the
+  library publish menu item are hidden
+- SHARE_NOTE: plain-text note (with a minimal markup) in the share dialog,
+  warning style
+- DISABLE_COLLABORATION: no socket is ever opened, #room links keep the local
+  scene and show a toast, Share offers only the shareable link
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ excalidraw-app/App.tsx                        | 70 ++++++++++++---
+ excalidraw-app/collab/Collab.tsx              | 14 ++-
+ .../components/EnvironmentBanner.scss         | 37 ++++++++
+ .../components/EnvironmentBanner.tsx          | 42 +++++++++
+ excalidraw-app/data/httpStorage.ts            | 11 +++
+ excalidraw-app/data/runtimeConfig.ts          | 83 ++++++++++++++++++
+ excalidraw-app/index.tsx                      | 21 +++--
+ excalidraw-app/share/ShareDialog.scss         | 42 +++++++++
+ excalidraw-app/share/ShareDialog.tsx          | 70 +++++++++++++--
+ excalidraw-app/share/shareNoteMarkup.ts       | 78 +++++++++++++++++
+ excalidraw-app/tests/runtimeConfig.test.ts    | 87 +++++++++++++++++++
+ excalidraw-app/tests/shareNoteMarkup.test.ts  | 73 ++++++++++++++++
+ excalidraw-app/vite.config.mts                |  4 +
+ .../components/LibraryMenuHeaderContent.tsx   |  3 +-
+ .../components/libraryPublishConfig.ts        | 11 +++
+ .../LiveCollaborationTrigger.tsx              |  2 +-
+ packages/excalidraw/index.tsx                 |  1 +
+ 17 files changed, 622 insertions(+), 27 deletions(-)
+ create mode 100644 excalidraw-app/components/EnvironmentBanner.scss
+ create mode 100644 excalidraw-app/components/EnvironmentBanner.tsx
+ create mode 100644 excalidraw-app/data/runtimeConfig.ts
+ create mode 100644 excalidraw-app/share/shareNoteMarkup.ts
+ create mode 100644 excalidraw-app/tests/runtimeConfig.test.ts
+ create mode 100644 excalidraw-app/tests/shareNoteMarkup.test.ts
+ create mode 100644 packages/excalidraw/components/libraryPublishConfig.ts
+
+diff --git a/excalidraw-app/App.tsx b/excalidraw-app/App.tsx
+index 549677533..934283d38 100644
+--- a/excalidraw-app/App.tsx
++++ b/excalidraw-app/App.tsx
+@@ -109,6 +109,8 @@ import {
+ } from "./data/localStorage";
+ 
+ import { loadFilesFromBackend } from "./data/httpStorage";
++import { getRuntimeConfig, runtimeConfigAtom } from "./data/runtimeConfig";
++import { EnvironmentBanner } from "./components/EnvironmentBanner";
+ import {
+   LibraryIndexedDBAdapter,
+   LibraryLocalStorageMigrationAdapter,
+@@ -206,6 +208,29 @@ const shareableLinkConfirmDialog = {
+   color: "danger",
+ } as const;
+ 
++// set by initializeScene() for a #room link; shown once the scene is applied
++let showCollabDisabledToast = false;
++
++const maybeShowCollabDisabledToast = (
++  excalidrawAPI: ExcalidrawImperativeAPI,
++) => {
++  if (!showCollabDisabledToast) {
++    return;
++  }
++  // the editor applies the initial data (and may reset transient state)
++  // asynchronously: wait until it is done loading
++  if (excalidrawAPI.getAppState().isLoading) {
++    requestAnimationFrame(() => maybeShowCollabDisabledToast(excalidrawAPI));
++    return;
++  }
++  showCollabDisabledToast = false;
++  excalidrawAPI.setToast({
++    message: "Live collaboration is disabled on this server.",
++    closable: true,
++    duration: 10000,
++  });
++};
++
+ const initializeScene = async (opts: {
+   collabAPI: CollabAPI | null;
+   excalidrawAPI: ExcalidrawImperativeAPI;
+@@ -240,6 +265,17 @@ const initializeScene = async (opts: {
+   };
+ 
+   let roomLinkData = getCollaborationLinkData(window.location.href);
++  if (roomLinkData && !getRuntimeConfig().collaboration) {
++    // collaboration is disabled on this server: keep the local scene, tell the
++    // user and drop the #room hash so a reload doesn't repeat this
++    roomLinkData = null;
++    window.history.replaceState(
++      {},
++      APP_NAME,
++      window.location.pathname + window.location.search,
++    );
++    showCollabDisabledToast = true;
++  }
+   const isExternalScene = !!(id || jsonBackendMatch || roomLinkData);
+   if (isExternalScene) {
+     if (
+@@ -373,7 +409,8 @@ const ExcalidrawWrapper = () => {
+   const excalidrawAPI = useExcalidrawAPI();
+ 
+   const [errorMessage, setErrorMessage] = useState("");
+-  const isCollabDisabled = isRunningInIframe();
++  const isCollabDisabled =
++    isRunningInIframe() || !getRuntimeConfig().collaboration;
+ 
+   const { editorTheme, appTheme, setAppTheme } = useHandleAppTheme();
+ 
+@@ -405,7 +442,10 @@ const ExcalidrawWrapper = () => {
+   const [, setShareDialogState] = useAtom(shareDialogStateAtom);
+   const [collabAPI] = useAtom(collabAPIAtom);
+   const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
+-    return isCollaborationLink(window.location.href);
++    return (
++      getRuntimeConfig().collaboration &&
++      isCollaborationLink(window.location.href)
++    );
+   });
+   const collabError = useAtomValue(collabErrorIndicatorAtom);
+   const userToFollow = useAtomValue(userToFollowAtom);
+@@ -565,6 +605,7 @@ const ExcalidrawWrapper = () => {
+     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
+       loadImages(data, /* isInitialLoad */ true);
+       initialStatePromiseRef.current.promise.resolve(data.scene);
++      maybeShowCollabDisabledToast(excalidrawAPI);
+     });
+ 
+     const onHashChange = async (event: HashChangeEvent) => {
+@@ -590,6 +631,7 @@ const ExcalidrawWrapper = () => {
+               captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+             });
+           }
++          maybeShowCollabDisabledToast(excalidrawAPI);
+         });
+       }
+     };
+@@ -821,15 +863,21 @@ const ExcalidrawWrapper = () => {
+     );
+   };
+ 
++  const { persistence, collaboration } = useAtomValue(runtimeConfigAtom);
+   const isOffline = useAtomValue(isOfflineAtom);
+   const isCollabAvailable =
+     !isCollabDisabled && (!isOffline || isCollaborating);
++  // without collaboration the Share button only offers the shareable link,
++  // which needs persistence; with both disabled there is nothing to share
++  const isShareAvailable =
++    isCollabAvailable ||
++    (!collaboration && persistence && !isRunningInIframe() && !isOffline);
+ 
+   useEffect(() => {
+-    if (!isCollabAvailable) {
++    if (!isShareAvailable) {
+       setShareDialogState({ isOpen: false });
+     }
+-  }, [isCollabAvailable, setShareDialogState]);
++  }, [isShareAvailable, setShareDialogState]);
+ 
+   const localStorageQuotaExceeded = useAtomValue(localStorageQuotaExceededAtom);
+ 
+@@ -926,9 +974,7 @@ const ExcalidrawWrapper = () => {
+         UIOptions={{
+           canvasActions: {
+             toggleTheme: true,
+-            export: {
+-              onExportToBackend,
+-            },
++            export: persistence ? { onExportToBackend } : {},
+           },
+         }}
+         langCode={langCode}
+@@ -939,7 +985,7 @@ const ExcalidrawWrapper = () => {
+         theme={editorTheme}
+         onThemeChange={setAppTheme}
+         renderTopRightUI={(isMobile) => {
+-          if (isMobile || !collabAPI || !isCollabAvailable) {
++          if (isMobile || !isShareAvailable || (collaboration && !collabAPI)) {
+             return null;
+           }
+ 
+@@ -947,6 +993,7 @@ const ExcalidrawWrapper = () => {
+             <div className="excalidraw-ui-top-right">
+               {collabError.message && <CollabError collabError={collabError} />}
+               <LiveCollaborationTrigger
++                {...(collaboration ? {} : { title: t("labels.share") })}
+                 isCollaborating={isCollaborating}
+                 onSelect={() =>
+                   setShareDialogState({ isOpen: true, type: "share" })
+@@ -1079,7 +1126,7 @@ const ExcalidrawWrapper = () => {
+             {
+               label: t("labels.share"),
+               category: DEFAULT_CATEGORIES.app,
+-              predicate: isCollabAvailable,
++              predicate: isShareAvailable,
+               icon: share,
+               keywords: [
+                 "link",
+@@ -1130,7 +1177,10 @@ const ExcalidrawApp = () => {
+     <TopErrorBoundary>
+       <Provider store={appJotaiStore}>
+         <ExcalidrawAPIProvider>
+-          <ExcalidrawWrapper />
++          <div className="excalidraw-app-shell">
++            <EnvironmentBanner />
++            <ExcalidrawWrapper />
++          </div>
+         </ExcalidrawAPIProvider>
+       </Provider>
+     </TopErrorBoundary>
+diff --git a/excalidraw-app/collab/Collab.tsx b/excalidraw-app/collab/Collab.tsx
+index 32abce716..e46c0a957 100644
+--- a/excalidraw-app/collab/Collab.tsx
++++ b/excalidraw-app/collab/Collab.tsx
+@@ -87,6 +87,7 @@ import {
+   importUsernameFromLocalStorage,
+   saveUsernameToLocalStorage,
+ } from "../data/localStorage";
++import { getRuntimeConfig } from "../data/runtimeConfig";
+ import { resetBrowserStateVersions } from "../data/tabSync";
+ 
+ import { collabErrorIndicatorAtom } from "./CollabError";
+@@ -155,7 +156,8 @@ class Collab extends PureComponent<CollabProps, CollabState> {
+     this.state = {
+       errorMessage: null,
+       dialogNotifiedErrors: {},
+-      username: importUsernameFromLocalStorage() || "",
++      username:
++        getRuntimeConfig().username || importUsernameFromLocalStorage() || "",
+       activeRoomLink: null,
+     };
+     this.portal = new Portal(this);
+@@ -498,6 +500,11 @@ class Collab extends PureComponent<CollabProps, CollabState> {
+   startCollaboration = async (
+     existingRoomLinkData: null | { roomId: string; roomKey: string },
+   ) => {
++    if (!getRuntimeConfig().collaboration) {
++      // disabled on the server: never create a socket
++      return null;
++    }
++
+     if (!this.state.username) {
+       import("@excalidraw/random-username").then(({ getRandomUsername }) => {
+         const username = getRandomUsername();
+@@ -1043,6 +1050,11 @@ class Collab extends PureComponent<CollabProps, CollabState> {
+   };
+ 
+   setUsername = (username: string) => {
++    const { username: forcedUsername, usernameLocked } = getRuntimeConfig();
++    if (forcedUsername && usernameLocked) {
++      // set by the organisation (reverse proxy header), can't be changed
++      return;
++    }
+     this.setState({ username });
+     saveUsernameToLocalStorage(username);
+ 
+diff --git a/excalidraw-app/components/EnvironmentBanner.scss b/excalidraw-app/components/EnvironmentBanner.scss
+new file mode 100644
+index 000000000..620863911
+--- /dev/null
++++ b/excalidraw-app/components/EnvironmentBanner.scss
+@@ -0,0 +1,37 @@
++.excalidraw-app-shell {
++  display: flex;
++  flex-direction: column;
++  height: 100%;
++
++  // the editor takes the space left below the banner
++  > .excalidraw-app {
++    flex: 1 1 0;
++    min-height: 0;
++    position: relative;
++  }
++}
++
++.environment-banner {
++  flex: 0 0 24px;
++  height: 24px;
++  box-sizing: border-box;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  padding: 0 8px;
++  // system fonts only: nothing to download, works offline
++  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
++    Arial, sans-serif;
++  font-size: 15px;
++  font-weight: 700;
++  line-height: 24px;
++  letter-spacing: 0.04em;
++  text-align: center;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  user-select: none;
++  // above the editor UI but below modals/dialogs
++  position: relative;
++  z-index: 1;
++}
+diff --git a/excalidraw-app/components/EnvironmentBanner.tsx b/excalidraw-app/components/EnvironmentBanner.tsx
+new file mode 100644
+index 000000000..51f5be572
+--- /dev/null
++++ b/excalidraw-app/components/EnvironmentBanner.tsx
+@@ -0,0 +1,42 @@
++import { useEffect } from "react";
++
++import { useAtomValue } from "../app-jotai";
++import { isCollaboratingAtom } from "../collab/Collab";
++import { runtimeConfigAtom } from "../data/runtimeConfig";
++
++import "./EnvironmentBanner.scss";
++
++/**
++ * full-width strip at the very top, e.g. "QA" / "PROD" (text only). In mode
++ * "sending" it is only shown while a live collaboration session is active
++ * (the scene leaves the browser); mode "always" shows it permanently.
++ */
++export const EnvironmentBanner = () => {
++  const { banner } = useAtomValue(runtimeConfigAtom);
++  const isCollaborating = useAtomValue(isCollaboratingAtom);
++  const visible = !!banner && (banner.mode === "always" || isCollaborating);
++
++  // The editor re-measures itself through a ResizeObserver; additionally nudge
++  // it with a window resize so it never keeps a stale size/offset when the
++  // banner appears or disappears.
++  useEffect(() => {
++    const frame = requestAnimationFrame(() => {
++      window.dispatchEvent(new Event("resize"));
++    });
++    return () => cancelAnimationFrame(frame);
++  }, [visible]);
++
++  if (!banner || !visible) {
++    return null;
++  }
++  return (
++    <div
++      className="environment-banner"
++      role="status"
++      data-testid="environment-banner"
++      style={{ backgroundColor: banner.color, color: banner.textColor }}
++    >
++      {banner.text}
++    </div>
++  );
++};
+diff --git a/excalidraw-app/data/httpStorage.ts b/excalidraw-app/data/httpStorage.ts
+index e93f6950b..c6b954bb9 100644
+--- a/excalidraw-app/data/httpStorage.ts
++++ b/excalidraw-app/data/httpStorage.ts
+@@ -21,6 +21,8 @@ import type {
+   DataURL,
+ } from "@excalidraw/excalidraw/types";
+ 
++import { getRuntimeConfig } from "./runtimeConfig";
++
+ import { getSyncableElements } from ".";
+ 
+ import type { SyncableExcalidrawElement } from ".";
+@@ -136,6 +138,10 @@ export const isSavedToBackend = (
+   portal: Portal,
+   elements: readonly ExcalidrawElement[],
+ ): boolean => {
++  if (!getRuntimeConfig().persistence) {
++    // scenes are never saved; peers sync the scene over the socket
++    return true;
++  }
+   if (portal.socket && portal.roomId && portal.roomKey) {
+     const sceneVersion = getSceneVersion(elements);
+ 
+@@ -199,6 +205,8 @@ export const saveToBackend = async (
+ ) => {
+   const { roomId, roomKey, socket } = portal;
+   if (
++    // persistence disabled on the server: skip silently
++    !getRuntimeConfig().persistence ||
+     // bail if no room exists as there's nothing we can do at this point
+     !roomId ||
+     !roomKey ||
+@@ -247,6 +255,9 @@ export const loadFromBackend = async (
+   roomKey: string,
+   socket: Socket | null,
+ ): Promise<readonly SyncableExcalidrawElement[] | null> => {
++  if (!getRuntimeConfig().persistence) {
++    return null;
++  }
+   const storedScene = await fetchStoredScene(roomId);
+   if (!storedScene) {
+     return null;
+diff --git a/excalidraw-app/data/runtimeConfig.ts b/excalidraw-app/data/runtimeConfig.ts
+new file mode 100644
+index 000000000..3fbcc8193
+--- /dev/null
++++ b/excalidraw-app/data/runtimeConfig.ts
+@@ -0,0 +1,83 @@
++/**
++ * Runtime configuration served by the offline server at `GET /api/config`
++ * (environment banner, username from a reverse-proxy header, persistence
++ * toggle, collaboration toggle). Fetched once at startup; any failure falls
++ * back to the defaults, so the app also works against an older server.
++ */
++import { atom, appJotaiStore } from "../app-jotai";
++
++export type RuntimeConfig = {
++  banner: {
++    text: string;
++    color: string;
++    textColor: string;
++    /** "sending": only while a live collaboration session is active */
++    mode: "sending" | "always";
++  } | null;
++  /** plain-text note shown in the share dialog */
++  shareNote: string | null;
++  username: string | null;
++  usernameLocked: boolean;
++  persistence: boolean;
++  /** false: no live collaboration (no socket is ever opened) */
++  collaboration: boolean;
++};
++
++export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
++  banner: null,
++  shareNote: null,
++  username: null,
++  usernameLocked: false,
++  persistence: true,
++  collaboration: true,
++};
++
++export const runtimeConfigAtom = atom<RuntimeConfig>(DEFAULT_RUNTIME_CONFIG);
++
++export const getRuntimeConfig = (): RuntimeConfig =>
++  appJotaiStore.get(runtimeConfigAtom);
++
++const str = (value: unknown, max: number): string | null =>
++  typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
++
++/** defensive parsing of the server response */
++export const parseRuntimeConfig = (data: any): RuntimeConfig => {
++  const config: RuntimeConfig = { ...DEFAULT_RUNTIME_CONFIG };
++  if (!data || typeof data !== "object") {
++    return config;
++  }
++  const text = str(data.banner?.text, 100);
++  if (text) {
++    config.banner = {
++      text,
++      color: str(data.banner.color, 32) ?? "#8b0000",
++      textColor: str(data.banner.textColor, 32) ?? "#ffffff",
++      mode: data.banner.mode === "sending" ? "sending" : "always",
++    };
++  }
++  config.shareNote =
++    typeof data.shareNote === "string"
++      ? data.shareNote.replace(/\r\n?/g, "\n").trim().slice(0, 500) || null
++      : null;
++  config.username = str(data.username, 64);
++  config.usernameLocked = !!config.username && data.usernameLocked !== false;
++  config.persistence = data.persistence !== false;
++  // missing (older server) means enabled
++  config.collaboration = data.collaboration !== false;
++  return config;
++};
++
++export const loadRuntimeConfig = async (): Promise<RuntimeConfig> => {
++  try {
++    const response = await fetch("/api/config", {
++      cache: "no-store",
++      signal: AbortSignal.timeout(3000),
++    });
++    if (!response.ok) {
++      return DEFAULT_RUNTIME_CONFIG;
++    }
++    return parseRuntimeConfig(await response.json());
++  } catch (error: any) {
++    return DEFAULT_RUNTIME_CONFIG;
++  }
++};
+diff --git a/excalidraw-app/index.tsx b/excalidraw-app/index.tsx
+index b3c27488e..8cd5c3bb4 100644
+--- a/excalidraw-app/index.tsx
++++ b/excalidraw-app/index.tsx
+@@ -2,7 +2,11 @@ import { StrictMode } from "react";
+ import { createRoot } from "react-dom/client";
+ import { registerSW } from "virtual:pwa-register";
+ 
++import { setLibraryPublishEnabled } from "@excalidraw/excalidraw";
++
+ import ExcalidrawApp from "./App";
++import { appJotaiStore } from "./app-jotai";
++import { loadRuntimeConfig, runtimeConfigAtom } from "./data/runtimeConfig";
+ 
+ // the entry's JavaScript and CSS loaded and ran (`scripts/stats/perf.mjs`)
+ performance.mark("excalidraw:app-start");
+@@ -11,8 +15,15 @@ window.__EXCALIDRAW_SHA__ = import.meta.env.VITE_APP_GIT_SHA;
+ const rootElement = document.getElementById("root")!;
+ const root = createRoot(rootElement);
+ registerSW();
+-root.render(
+-  <StrictMode>
+-    <ExcalidrawApp />
+-  </StrictMode>,
+-);
++
++// the runtime config (banner, username, persistence) must be known before the
++// first render; it never blocks for long and falls back to defaults on error
++loadRuntimeConfig().then((config) => {
++  appJotaiStore.set(runtimeConfigAtom, config);
++  setLibraryPublishEnabled(config.persistence);
++  root.render(
++    <StrictMode>
++      <ExcalidrawApp />
++    </StrictMode>,
++  );
++});
+diff --git a/excalidraw-app/share/ShareDialog.scss b/excalidraw-app/share/ShareDialog.scss
+index 169cc03bd..dfca3b249 100644
+--- a/excalidraw-app/share/ShareDialog.scss
++++ b/excalidraw-app/share/ShareDialog.scss
+@@ -10,6 +10,42 @@
+       height: calc(100vh - 5rem);
+     }
+ 
++    // styled as a warning, like the editor's own warning toasts/alerts
++    &__note {
++      box-sizing: border-box;
++      display: flex;
++      gap: 0.625rem;
++      align-items: flex-start;
++      padding: 0.625rem 0.75rem;
++      border: 1px solid var(--color-warning-darker);
++      border-left-width: 4px;
++      border-radius: var(--border-radius-lg);
++      background: var(--color-warning);
++      color: var(--color-text-warning);
++      font-size: 0.875rem;
++      line-height: 1.4;
++
++      &__icon {
++        flex: 0 0 auto;
++        display: flex;
++        width: 1.25rem;
++        height: 1.25rem;
++        color: var(--color-warning-darkest);
++
++        svg {
++          width: 100%;
++          height: 100%;
++        }
++      }
++
++      &__text {
++        flex: 1 1 auto;
++        min-width: 0;
++        white-space: pre-line;
++        overflow-wrap: anywhere;
++      }
++    }
++
+     &__separator {
+       border-top: 1px solid var(--dialog-border-color);
+       text-align: center;
+@@ -189,3 +225,9 @@
+     }
+   }
+ }
++
++.ShareDialog__username-hint {
++  font-size: 0.75rem;
++  opacity: 0.7;
++  margin-top: -0.5rem;
++}
+diff --git a/excalidraw-app/share/ShareDialog.tsx b/excalidraw-app/share/ShareDialog.tsx
+index 051393910..7b85ed314 100644
+--- a/excalidraw-app/share/ShareDialog.tsx
++++ b/excalidraw-app/share/ShareDialog.tsx
+@@ -4,6 +4,7 @@ import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
+ import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+ import { TextField } from "@excalidraw/excalidraw/components/TextField";
+ import {
++  alertTriangleIcon,
+   copyIcon,
+   LinkIcon,
+   playerPlayIcon,
+@@ -20,11 +21,14 @@ import { useEffect, useRef, useState } from "react";
+ 
+ import { atom, useAtom, useAtomValue } from "../app-jotai";
+ import { activeRoomLinkAtom } from "../collab/Collab";
++import { runtimeConfigAtom } from "../data/runtimeConfig";
+ 
+ import "./ShareDialog.scss";
+ import { QRCode } from "./QRCode";
++import { parseShareNote } from "./shareNoteMarkup";
+ 
+ import type { CollabAPI } from "../collab/Collab";
++import type { NoteNode } from "./shareNoteMarkup";
+ 
+ type OnExportToBackend = () => void;
+ type ShareDialogType = "share" | "collaborationOnly";
+@@ -102,18 +106,33 @@ const ActiveRoomDialog = ({
+     }
+   };
+ 
++  const { username: forcedUsername, usernameLocked: locked } =
++    useAtomValue(runtimeConfigAtom);
++  const usernameLocked = !!forcedUsername && locked;
++
+   return (
+     <>
+       <h3 className="ShareDialog__active__header">
+         {t("labels.liveCollaboration").replace(/\./g, "")}
+       </h3>
+-      <TextField
+-        defaultValue={collabAPI.getUsername()}
+-        placeholder="Your name"
+-        label="Your name"
+-        onChange={collabAPI.setUsername}
+-        onKeyDown={(event) => event.key === KEYS.ENTER && handleClose()}
+-      />
++      <div
++        className="ShareDialog__username"
++        title={usernameLocked ? "Set by your organisation" : undefined}
++      >
++        <TextField
++          defaultValue={collabAPI.getUsername()}
++          placeholder="Your name"
++          label="Your name"
++          onChange={collabAPI.setUsername}
++          readonly={usernameLocked}
++          onKeyDown={(event) => event.key === KEYS.ENTER && handleClose()}
++        />
++      </div>
++      {usernameLocked && (
++        <div className="ShareDialog__username-hint">
++          Set by your organisation
++        </div>
++      )}
+       <div className="ShareDialog__active__linkRow">
+         <TextField
+           ref={ref}
+@@ -182,6 +201,7 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
+   const { t } = useI18n();
+ 
+   const { collabAPI } = props;
++  const { persistence } = useAtomValue(runtimeConfigAtom);
+ 
+   const startCollabJSX = collabAPI ? (
+     <>
+@@ -206,7 +226,7 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
+         />
+       </div>
+ 
+-      {props.type === "share" && (
++      {props.type === "share" && persistence && (
+         <div className="ShareDialog__separator">
+           <span>{t("shareDialog.or")}</span>
+         </div>
+@@ -218,7 +238,7 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
+     <>
+       {startCollabJSX}
+ 
+-      {props.type === "share" && (
++      {props.type === "share" && persistence && (
+         <>
+           <div className="ShareDialog__picker__header">
+             {t("exportDialog.link_title")}
+@@ -244,12 +264,44 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
+   );
+ };
+ 
++const renderNoteNodes = (nodes: NoteNode[]): React.ReactNode[] =>
++  nodes.map((node, i) =>
++    typeof node === "string" ? (
++      node
++    ) : node.type === "strong" ? (
++      <strong key={i}>{renderNoteNodes(node.children)}</strong>
++    ) : (
++      <span key={i} style={{ color: node.color }}>
++        {renderNoteNodes(node.children)}
++      </span>
++    ),
++  );
++
++/** operator-configured note (SHARE_NOTE); rendered as text, never HTML */
++const ShareNote = () => {
++  const { shareNote } = useAtomValue(runtimeConfigAtom);
++  if (!shareNote) {
++    return null;
++  }
++  return (
++    <div className="ShareDialog__note" data-testid="share-note" role="note">
++      <span className="ShareDialog__note__icon" aria-hidden="true">
++        {alertTriangleIcon}
++      </span>
++      <div className="ShareDialog__note__text">
++        {renderNoteNodes(parseShareNote(shareNote))}
++      </div>
++    </div>
++  );
++};
++
+ const ShareDialogInner = (props: ShareDialogProps) => {
+   const activeRoomLink = useAtomValue(activeRoomLinkAtom);
+ 
+   return (
+     <Dialog size="small" onCloseRequest={props.handleClose} title={false}>
+       <div className="ShareDialog">
++        <ShareNote />
+         {props.collabAPI && activeRoomLink ? (
+           <ActiveRoomDialog
+             collabAPI={props.collabAPI}
+diff --git a/excalidraw-app/share/shareNoteMarkup.ts b/excalidraw-app/share/shareNoteMarkup.ts
+new file mode 100644
+index 000000000..1f9b58a61
+--- /dev/null
++++ b/excalidraw-app/share/shareNoteMarkup.ts
+@@ -0,0 +1,78 @@
++/**
++ * Tiny, safe markup for the share dialog note (SHARE_NOTE). Not HTML:
++ *   **bold**            -> strong
++ *   [red]text[/]        -> coloured (CSS colour name, #rgb or #rrggbb)
++ * Anything unmatched or invalid stays literal text. The result is a tree that
++ * is rendered as React elements (no innerHTML anywhere).
++ */
++export type NoteNode =
++  | string
++  | { type: "strong"; children: NoteNode[] }
++  | { type: "color"; color: string; children: NoteNode[] };
++
++const COLOR = /^(?:[a-zA-Z]{3,30}|#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6})$/;
++const TOKEN = /\*\*|\[\/\]|\[([^[\]\s]+)\]/g;
++
++type Frame = {
++  type: "root" | "strong" | "color";
++  color?: string;
++  raw: string;
++  children: NoteNode[];
++};
++
++const push = (children: NoteNode[], node: NoteNode) => {
++  const last = children[children.length - 1];
++  if (typeof node === "string" && typeof last === "string") {
++    children[children.length - 1] = last + node;
++  } else if (node !== "") {
++    children.push(node);
++  }
++};
++
++export const parseShareNote = (input: string): NoteNode[] => {
++  const root: Frame = { type: "root", raw: "", children: [] };
++  const stack: Frame[] = [root];
++  const top = () => stack[stack.length - 1];
++
++  let index = 0;
++  for (const match of input.matchAll(TOKEN)) {
++    const [token, colour] = match;
++    push(top().children, input.slice(index, match.index));
++    index = match.index! + token.length;
++
++    if (token === "**") {
++      if (top().type === "strong") {
++        const frame = stack.pop()!;
++        push(top().children, { type: "strong", children: frame.children });
++      } else {
++        stack.push({ type: "strong", raw: token, children: [] });
++      }
++    } else if (token === "[/]") {
++      if (top().type === "color") {
++        const frame = stack.pop()!;
++        push(top().children, {
++          type: "color",
++          color: frame.color!,
++          children: frame.children,
++        });
++      } else {
++        push(top().children, token);
++      }
++    } else if (colour && COLOR.test(colour)) {
++      stack.push({ type: "color", color: colour, raw: token, children: [] });
++    } else {
++      push(top().children, token);
++    }
++  }
++  push(top().children, input.slice(index));
++
++  // unclosed markers: render them literally, keep their content
++  while (stack.length > 1) {
++    const frame = stack.pop()!;
++    push(top().children, frame.raw);
++    for (const child of frame.children) {
++      push(top().children, child);
++    }
++  }
++  return root.children;
++};
+diff --git a/excalidraw-app/tests/runtimeConfig.test.ts b/excalidraw-app/tests/runtimeConfig.test.ts
+new file mode 100644
+index 000000000..54e762fe0
+--- /dev/null
++++ b/excalidraw-app/tests/runtimeConfig.test.ts
+@@ -0,0 +1,87 @@
++import {
++  DEFAULT_RUNTIME_CONFIG,
++  parseRuntimeConfig,
++} from "../data/runtimeConfig";
++
++describe("parseRuntimeConfig", () => {
++  it("falls back to defaults on garbage", () => {
++    expect(parseRuntimeConfig(null)).toEqual(DEFAULT_RUNTIME_CONFIG);
++    expect(parseRuntimeConfig("x")).toEqual(DEFAULT_RUNTIME_CONFIG);
++    expect(parseRuntimeConfig({})).toEqual(DEFAULT_RUNTIME_CONFIG);
++  });
++
++  it("parses banner, username and persistence", () => {
++    expect(
++      parseRuntimeConfig({
++        banner: { text: "QA", color: "#123456", textColor: "white" },
++        username: " Ada ",
++        usernameLocked: true,
++        persistence: false,
++      }),
++    ).toEqual({
++      banner: {
++        text: "QA",
++        color: "#123456",
++        textColor: "white",
++        mode: "always",
++      },
++      shareNote: null,
++      username: "Ada",
++      usernameLocked: true,
++      persistence: false,
++      collaboration: true,
++    });
++  });
++
++  it("only locks when a username is present", () => {
++    expect(
++      parseRuntimeConfig({ username: null, usernameLocked: true })
++        .usernameLocked,
++    ).toBe(false);
++    expect(
++      parseRuntimeConfig({ username: "a", usernameLocked: false })
++        .usernameLocked,
++    ).toBe(false);
++  });
++});
++
++describe("collaboration toggle", () => {
++  it("is enabled by default and for older servers", () => {
++    expect(DEFAULT_RUNTIME_CONFIG.collaboration).toBe(true);
++    expect(parseRuntimeConfig({}).collaboration).toBe(true);
++    expect(parseRuntimeConfig({ persistence: false }).collaboration).toBe(true);
++    expect(parseRuntimeConfig({ collaboration: "no" }).collaboration).toBe(
++      true,
++    );
++  });
++
++  it("is disabled only by an explicit false", () => {
++    expect(parseRuntimeConfig({ collaboration: false }).collaboration).toBe(
++      false,
++    );
++    expect(parseRuntimeConfig({ collaboration: true }).collaboration).toBe(
++      true,
++    );
++  });
++});
++
++describe("banner mode and share note", () => {
++  it("defaults the mode to always, accepts sending", () => {
++    expect(parseRuntimeConfig({ banner: { text: "QA" } }).banner?.mode).toBe(
++      "always",
++    );
++    expect(
++      parseRuntimeConfig({ banner: { text: "QA", mode: "sending" } }).banner
++        ?.mode,
++    ).toBe("sending");
++    expect(
++      parseRuntimeConfig({ banner: { text: "QA", mode: "x" } }).banner?.mode,
++    ).toBe("always");
++  });
++
++  it("parses the share note", () => {
++    expect(parseRuntimeConfig({}).shareNote).toBeNull();
++    expect(parseRuntimeConfig({ shareNote: "  a\nb " }).shareNote).toBe("a\nb");
++    expect(parseRuntimeConfig({ shareNote: 5 }).shareNote).toBeNull();
++  });
++});
+diff --git a/excalidraw-app/tests/shareNoteMarkup.test.ts b/excalidraw-app/tests/shareNoteMarkup.test.ts
+new file mode 100644
+index 000000000..beb677ef4
+--- /dev/null
++++ b/excalidraw-app/tests/shareNoteMarkup.test.ts
+@@ -0,0 +1,73 @@
++import { parseShareNote } from "../share/shareNoteMarkup";
++
++describe("parseShareNote", () => {
++  it("plain text and newlines", () => {
++    expect(parseShareNote("a\nb")).toEqual(["a\nb"]);
++    expect(parseShareNote("")).toEqual([]);
++  });
++
++  it("bold", () => {
++    expect(parseShareNote("a **b** c")).toEqual([
++      "a ",
++      { type: "strong", children: ["b"] },
++      " c",
++    ]);
++  });
++
++  it("named and hex colours", () => {
++    expect(parseShareNote("[red]x[/]")).toEqual([
++      { type: "color", color: "red", children: ["x"] },
++    ]);
++    expect(parseShareNote("[#c92a2a]x[/] [#abc]y[/]")).toEqual([
++      { type: "color", color: "#c92a2a", children: ["x"] },
++      " ",
++      { type: "color", color: "#abc", children: ["y"] },
++    ]);
++  });
++
++  it("invalid colours stay literal", () => {
++    for (const bad of [
++      "red;x",
++      "#12",
++      "#12345g",
++      "rgb(0,0,0)",
++      "url(x)",
++      "a",
++    ]) {
++      expect(parseShareNote(`[${bad}]x[/]`)).toEqual([`[${bad}]x[/]`]);
++    }
++  });
++
++  it("nesting both ways", () => {
++    expect(parseShareNote("**[red]x[/]**")).toEqual([
++      {
++        type: "strong",
++        children: [{ type: "color", color: "red", children: ["x"] }],
++      },
++    ]);
++    expect(parseShareNote("[#c92a2a]**x**[/]")).toEqual([
++      {
++        type: "color",
++        color: "#c92a2a",
++        children: [{ type: "strong", children: ["x"] }],
++      },
++    ]);
++  });
++
++  it("unclosed or unmatched markers are literal", () => {
++    expect(parseShareNote("**a")).toEqual(["**a"]);
++    expect(parseShareNote("[red]a")).toEqual(["[red]a"]);
++    expect(parseShareNote("a[/]b")).toEqual(["a[/]b"]);
++    expect(parseShareNote("**a [red]b**")).toEqual(["**a [red]b**"]);
++    expect(parseShareNote("**a **[red]b[/]")).toEqual([
++      { type: "strong", children: ["a "] },
++      { type: "color", color: "red", children: ["b"] },
++    ]);
++  });
++
++  it("HTML is literal", () => {
++    expect(parseShareNote("<b>x</b> <img src=x>")).toEqual([
++      "<b>x</b> <img src=x>",
++    ]);
++  });
++});
+diff --git a/excalidraw-app/vite.config.mts b/excalidraw-app/vite.config.mts
+index 7ec147bc8..7fe9369d2 100644
+--- a/excalidraw-app/vite.config.mts
++++ b/excalidraw-app/vite.config.mts
+@@ -316,6 +316,10 @@ export default defineConfig(({ mode }) => {
+               (route) => new RegExp(`^${route}(\\?|$)`),
+             ),
+           ],
++          // never serve the app shell for API requests; /api/* (runtime
++          // config, storage) must always hit the network and is not matched
++          // by any runtimeCaching rule below
++          navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io\//],
+           // don't precache fonts, locales and separate chunks
+           globIgnores: [
+             "404.html",
+diff --git a/packages/excalidraw/components/LibraryMenuHeaderContent.tsx b/packages/excalidraw/components/LibraryMenuHeaderContent.tsx
+index 4b9e3edd1..e51fe8233 100644
+--- a/packages/excalidraw/components/LibraryMenuHeaderContent.tsx
++++ b/packages/excalidraw/components/LibraryMenuHeaderContent.tsx
+@@ -16,6 +16,7 @@ import ConfirmDialog from "./ConfirmDialog";
+ import { Dialog } from "./Dialog";
+ import { isLibraryMenuOpenAtom } from "./LibraryMenu";
+ import PublishLibrary from "./PublishLibrary";
++import { isLibraryPublishEnabled } from "./libraryPublishConfig";
+ import { IconButton } from "./IconButton";
+ import Trans from "./Trans";
+ import DropdownMenu from "./dropdownMenu/DropdownMenu";
+@@ -220,7 +221,7 @@ export const LibraryDropdownMenuButton: React.FC<{
+               {t("buttons.export")}
+             </DropdownMenu.Item>
+           )}
+-          {itemsSelected && (
++          {itemsSelected && isLibraryPublishEnabled() && (
+             <DropdownMenu.Item
+               icon={publishIcon}
+               onSelect={() => setShowPublishLibraryDialog(true)}
+diff --git a/packages/excalidraw/components/libraryPublishConfig.ts b/packages/excalidraw/components/libraryPublishConfig.ts
+new file mode 100644
+index 000000000..515131f17
+--- /dev/null
++++ b/packages/excalidraw/components/libraryPublishConfig.ts
+@@ -0,0 +1,11 @@
++/**
++ * Lets the host app turn off "Publish library" at runtime (e.g. when the
++ * server runs with persistence disabled). Read when the library menu renders.
++ */
++let enabled = true;
++
++export const setLibraryPublishEnabled = (value: boolean) => {
++  enabled = value;
++};
++
++export const isLibraryPublishEnabled = () => enabled;
+diff --git a/packages/excalidraw/components/live-collaboration/LiveCollaborationTrigger.tsx b/packages/excalidraw/components/live-collaboration/LiveCollaborationTrigger.tsx
+index 3a611be04..634b6f870 100644
+--- a/packages/excalidraw/components/live-collaboration/LiveCollaborationTrigger.tsx
++++ b/packages/excalidraw/components/live-collaboration/LiveCollaborationTrigger.tsx
+@@ -27,12 +27,12 @@ const LiveCollaborationTrigger = ({
+ 
+   return (
+     <Button
++      title={t("labels.liveCollaboration")}
+       {...rest}
+       className={clsx("collab-button", { active: isCollaborating })}
+       type="button"
+       onSelect={onSelect}
+       style={{ position: "relative", width: showIconOnly ? undefined : "auto" }}
+-      title={t("labels.liveCollaboration")}
+     >
+       {showIconOnly ? share : t("labels.share")}
+       {appState.collaborators.size > 0 && (
+diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
+index 44df15555..bd2881094 100644
+--- a/packages/excalidraw/index.tsx
++++ b/packages/excalidraw/index.tsx
+@@ -425,6 +425,7 @@ export {
+   getNonDeletedElements,
+ } from "@excalidraw/element";
+ 
++export { setLibraryPublishEnabled } from "./components/libraryPublishConfig";
+ export { getTextFromElements } from "@excalidraw/element";
+ export { isInvisiblySmallElement } from "@excalidraw/element";
+ 

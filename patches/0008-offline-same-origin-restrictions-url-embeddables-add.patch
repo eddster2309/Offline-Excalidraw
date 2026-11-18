@@ -1,0 +1,184 @@
+From 5a4e5f5ef0c0c849285a6ef05f380ab4ac5136bb Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 20:56:09 +1100
+Subject: [PATCH 8/9] offline: same-origin restrictions (#url=, embeddables,
+ #addLibrary) and library catalog
+
+- #url= scenes, embeddables and #addLibrary= install urls must be same
+  origin (one shared isSameOriginUrl helper)
+- VITE_APP_LIBRARY_URL=/libraries/ and VITE_APP_LIBRARY_BACKEND=/api/libraries
+  (relative, served by the offline server; the dev server proxies /libraries
+  and /api)
+- publish dialog points at the local library catalog and its texts say
+  "published" instead of "submitted for review"
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .env.development                              |  6 +++--
+ .env.production                               |  6 +++--
+ excalidraw-app/App.tsx                        | 18 ++++++++++++-
+ .../excalidraw/components/PublishLibrary.tsx  | 25 ++++---------------
+ packages/excalidraw/locales/en.json           |  6 ++---
+ 5 files changed, 33 insertions(+), 28 deletions(-)
+
+diff --git a/.env.development b/.env.development
+index 419c215eb..6dab322fc 100644
+--- a/.env.development
++++ b/.env.development
+@@ -1,7 +1,9 @@
+ MODE="development"
+ 
+-VITE_APP_LIBRARY_URL=https://libraries.excalidraw.com
+-VITE_APP_LIBRARY_BACKEND=https://us-central1-excalidraw-room-persistence.cloudfunctions.net/libraries
++# Offline library site + publish backend, served by the offline server on the
++# app origin (relative paths)
++VITE_APP_LIBRARY_URL=/libraries/
++VITE_APP_LIBRARY_BACKEND=/api/libraries
+ 
+ VITE_APP_PLUS_LP=
+ VITE_APP_PLUS_APP=
+diff --git a/.env.production b/.env.production
+index b5bea6999..f66f8136d 100644
+--- a/.env.production
++++ b/.env.production
+@@ -1,7 +1,9 @@
+ MODE="production"
+ 
+-VITE_APP_LIBRARY_URL=https://libraries.excalidraw.com
+-VITE_APP_LIBRARY_BACKEND=https://us-central1-excalidraw-room-persistence.cloudfunctions.net/libraries
++# Offline library site + publish backend, served by the offline server on the
++# app origin (relative paths)
++VITE_APP_LIBRARY_URL=/libraries/
++VITE_APP_LIBRARY_BACKEND=/api/libraries
+ 
+ VITE_APP_PLUS_LP=
+ VITE_APP_PLUS_APP=
+diff --git a/excalidraw-app/App.tsx b/excalidraw-app/App.tsx
+index 0eddd0fc0..549677533 100644
+--- a/excalidraw-app/App.tsx
++++ b/excalidraw-app/App.tsx
+@@ -185,6 +185,14 @@ if (window.self !== window.top) {
+   }
+ }
+ 
++const isSameOriginUrl = (url: string) => {
++  try {
++    return new URL(url, window.location.href).origin === window.location.origin;
++  } catch {
++    return false;
++  }
++};
++
+ const shareableLinkConfirmDialog = {
+   title: t("overwriteConfirm.modal.shareableLink.title"),
+   description: (
+@@ -290,7 +298,12 @@ const initializeScene = async (opts: {
+ 
+     const url = externalUrlMatch[1];
+     try {
+-      const request = await fetch(window.decodeURIComponent(url));
++      const sceneUrl = window.decodeURIComponent(url);
++      // offline: only same-origin scene urls are allowed
++      if (!isSameOriginUrl(sceneUrl)) {
++        throw new Error(`Disallowed external scene URL: "${sceneUrl}"`);
++      }
++      const request = await fetch(sceneUrl);
+       const data = await loadFromBlob(await request.blob(), null, null);
+       if (
+         !scene.elements.length ||
+@@ -432,6 +445,8 @@ const ExcalidrawWrapper = () => {
+     adapter: LibraryIndexedDBAdapter,
+     // TODO maybe remove this in several months (shipped: 24-03-11)
+     migrationAdapter: LibraryLocalStorageMigrationAdapter,
++    // only allow installing libraries (#addLibrary=) from the same origin
++    validateLibraryUrl: isSameOriginUrl,
+   });
+ 
+   const [, forceRefresh] = useState(false);
+@@ -904,6 +919,7 @@ const ExcalidrawWrapper = () => {
+         userToFollow={userToFollow}
+         onChange={onChange}
+         onExport={onExport}
++        validateEmbeddable={isSameOriginUrl}
+         initialData={initialStatePromiseRef.current.promise}
+         isCollaborating={isCollaborating}
+         onPointerUpdate={collabAPI?.onPointerUpdate}
+diff --git a/packages/excalidraw/components/PublishLibrary.tsx b/packages/excalidraw/components/PublishLibrary.tsx
+index 495d9b3af..9432e8d96 100644
+--- a/packages/excalidraw/components/PublishLibrary.tsx
++++ b/packages/excalidraw/components/PublishLibrary.tsx
+@@ -28,6 +28,9 @@ import type { ReactNode } from "react";
+ import type { ExportedLibraryData } from "../data/types";
+ import type { LibraryItems, LibraryItem, UIAppState } from "../types";
+ 
++// same-origin library catalog (the offline server's /libraries/ site)
++const libraryCatalogUrl = import.meta.env.VITE_APP_LIBRARY_URL;
++
+ interface PublishLibraryDataParams {
+   authorName: string;
+   githubHandle: string;
+@@ -402,30 +405,12 @@ const PublishLibrary = ({
+             <Trans
+               i18nKey="publishDialog.noteDescription"
+               link={(el) => (
+-                <a
+-                  href="https://libraries.excalidraw.com"
+-                  target="_blank"
+-                  rel="noopener"
+-                >
++                <a href={libraryCatalogUrl} target="_blank" rel="noopener">
+                   {el}
+                 </a>
+               )}
+             />
+           </div>
+-          <span className="publish-library-note">
+-            <Trans
+-              i18nKey="publishDialog.noteGuidelines"
+-              link={(el) => (
+-                <a
+-                  href="https://github.com/excalidraw/excalidraw-libraries#guidelines"
+-                  target="_blank"
+-                  rel="noopener noreferrer"
+-                >
+-                  {el}
+-                </a>
+-              )}
+-            />
+-          </span>
+ 
+           <div className="publish-library-note">
+             {t("publishDialog.noteItems")}
+@@ -522,7 +507,7 @@ const PublishLibrary = ({
+                 i18nKey="publishDialog.noteLicense"
+                 link={(el) => (
+                   <a
+-                    href="https://github.com/excalidraw/excalidraw-libraries/blob/main/LICENSE"
++                    href={`${libraryCatalogUrl}LICENSE`}
+                     target="_blank"
+                     rel="noopener noreferrer"
+                   >
+diff --git a/packages/excalidraw/locales/en.json b/packages/excalidraw/locales/en.json
+index 4601738bf..b523f78b6 100644
+--- a/packages/excalidraw/locales/en.json
++++ b/packages/excalidraw/locales/en.json
+@@ -518,7 +518,7 @@
+       "required": "Required",
+       "website": "Enter a valid URL"
+     },
+-    "noteDescription": "Submit your library to be included in the <link>public library repository</link> for other people to use in their drawings.",
++    "noteDescription": "Publish your library to the <link>library catalog</link> of this server for other people to use in their drawings.",
+     "noteGuidelines": "The library needs to be manually approved first. Please read the <link>guidelines</link> before submitting. You will need a GitHub account to communicate and make changes if requested, but it is not strictly required.",
+     "noteLicense": "By submitting, you agree the library will be published under the <link>MIT License</link>, which in short means anyone can use them without restrictions.",
+     "noteItems": "Each library item must have its own name so it's filterable. The following library items will be included:",
+@@ -526,8 +526,8 @@
+     "republishWarning": "Note: some of the selected items are marked as already published/submitted. You should only resubmit items when updating an existing library or submission."
+   },
+   "publishSuccessDialog": {
+-    "title": "Library submitted",
+-    "content": "Thank you {{authorName}}. Your library has been submitted for review. You can track the status <link>here</link>"
++    "title": "Library published",
++    "content": "Thank you {{authorName}}. Your library has been published. You can find it <link>here</link>"
+   },
+   "confirmDialog": {
+     "resetLibrary": "Reset library",

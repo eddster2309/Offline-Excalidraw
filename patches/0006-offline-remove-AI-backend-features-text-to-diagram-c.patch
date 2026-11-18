@@ -1,0 +1,358 @@
+From 2d61ac45b5086bad5ad33339985a232f6f33f171 Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 18:01:37 +1100
+Subject: [PATCH 6/9] offline: remove AI backend features (text-to-diagram
+ chat, diagram-to-code); keep Mermaid
+
+---
+ .env.development                              |   2 +-
+ .env.production                               |   2 +-
+ excalidraw-app/App.tsx                        |   4 +-
+ excalidraw-app/components/AI.tsx              | 186 ------------------
+ excalidraw-app/components/MermaidCache.tsx    |  20 ++
+ excalidraw-app/data/TTDStorage.ts             |  51 -----
+ .../components/TTDDialog/TTDDialog.tsx        |   5 +-
+ 7 files changed, 28 insertions(+), 242 deletions(-)
+ delete mode 100644 excalidraw-app/components/AI.tsx
+ create mode 100644 excalidraw-app/components/MermaidCache.tsx
+ delete mode 100644 excalidraw-app/data/TTDStorage.ts
+
+diff --git a/.env.development b/.env.development
+index 7b13a4a77..419c215eb 100644
+--- a/.env.development
++++ b/.env.development
+@@ -6,7 +6,7 @@ VITE_APP_LIBRARY_BACKEND=https://us-central1-excalidraw-room-persistence.cloudfu
+ VITE_APP_PLUS_LP=
+ VITE_APP_PLUS_APP=
+ 
+-VITE_APP_AI_BACKEND=http://localhost:3016
++VITE_APP_AI_BACKEND=
+ 
+ # put these in your .env.local, or make sure you don't commit!
+ # must be lowercase `true` when turned on
+diff --git a/.env.production b/.env.production
+index 54f96212a..b5bea6999 100644
+--- a/.env.production
++++ b/.env.production
+@@ -6,7 +6,7 @@ VITE_APP_LIBRARY_BACKEND=https://us-central1-excalidraw-room-persistence.cloudfu
+ VITE_APP_PLUS_LP=
+ VITE_APP_PLUS_APP=
+ 
+-VITE_APP_AI_BACKEND=https://oss-ai.excalidraw.com
++VITE_APP_AI_BACKEND=
+ 
+ VITE_APP_ENABLE_TRACKING=false
+ 
+diff --git a/excalidraw-app/App.tsx b/excalidraw-app/App.tsx
+index 69694659d..eda0a1463 100644
+--- a/excalidraw-app/App.tsx
++++ b/excalidraw-app/App.tsx
+@@ -134,7 +134,7 @@ import DebugCanvas, {
+   loadSavedDebugState,
+ } from "./components/DebugCanvas";
+ import { useSimulatedCollaborators } from "./debugCollaborators";
+-import { AIComponents } from "./components/AI";
++import { MermaidCache } from "./components/MermaidCache";
+ 
+ import "./index.scss";
+ 
+@@ -974,7 +974,7 @@ const ExcalidrawWrapper = () => {
+           <OverwriteConfirmDialog.Actions.SaveToDisk />
+         </OverwriteConfirmDialog>
+         <AppFooter onChange={() => excalidrawAPI?.refresh()} />
+-        {excalidrawAPI && <AIComponents excalidrawAPI={excalidrawAPI} />}
++        <MermaidCache />
+ 
+         <TTDDialogTrigger />
+         {isCollaborating && isOffline && (
+diff --git a/excalidraw-app/components/AI.tsx b/excalidraw-app/components/AI.tsx
+deleted file mode 100644
+index dcee47f84..000000000
+--- a/excalidraw-app/components/AI.tsx
++++ /dev/null
+@@ -1,186 +0,0 @@
+-import {
+-  DiagramToCodePlugin,
+-  exportScene,
+-  getNonDeletedElements,
+-  getTextFromElements,
+-  parseSSEStream,
+-  TTDDialog,
+-  TTDStreamFetch,
+-  THEME,
+-  useOnExcalidrawStateChange,
+-} from "@excalidraw/excalidraw";
+-import { getDataURL } from "@excalidraw/excalidraw/data/blob";
+-import { safelyParseJSON } from "@excalidraw/common";
+-
+-import type { StreamChunk } from "@excalidraw/excalidraw";
+-import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+-
+-import { cacheMermaidChunks } from "../data/cacheMermaidChunks";
+-import { TTDIndexedDBAdapter } from "../data/TTDStorage";
+-
+-export const AIComponents = ({
+-  excalidrawAPI,
+-}: {
+-  excalidrawAPI: ExcalidrawImperativeAPI;
+-}) => {
+-  useOnExcalidrawStateChange(
+-    (appState) => appState.openDialog?.name === "ttd",
+-    (isTTDDialogOpen) => {
+-      if (isTTDDialogOpen) {
+-        cacheMermaidChunks();
+-      }
+-    },
+-  );
+-
+-  return (
+-    <>
+-      <DiagramToCodePlugin
+-        generate={async ({ frame, children, onPartial }) => {
+-          const appState = excalidrawAPI.getAppState();
+-
+-          // SAFETY: This should never happen, but log it just in case
+-          if (children.some((el) => el.isDeleted)) {
+-            console.error(
+-              "[NONDELETED][INVARIANT] Generated children elements should not be `isDeleted: true`",
+-            );
+-          }
+-
+-          const blob = await exportScene({
+-            type: "jpeg",
+-            data: {
+-              elements: getNonDeletedElements(children),
+-              appState,
+-              files: excalidrawAPI.getFiles(),
+-            },
+-            config: {
+-              exportingFrame: frame,
+-              theme: appState.exportWithDarkMode ? THEME.DARK : THEME.LIGHT,
+-            },
+-          });
+-
+-          const dataURL = await getDataURL(blob);
+-
+-          const textFromFrameChildren = getTextFromElements(children);
+-
+-          const response = await fetch(
+-            `${
+-              import.meta.env.VITE_APP_AI_BACKEND
+-            }/v1/ai/diagram-to-code/generate-streaming`,
+-            {
+-              method: "POST",
+-              headers: {
+-                Accept: "text/event-stream",
+-                "Content-Type": "application/json",
+-              },
+-              body: JSON.stringify({
+-                texts: textFromFrameChildren,
+-                image: dataURL,
+-                theme: appState.theme,
+-              }),
+-            },
+-          );
+-
+-          if (!response.ok) {
+-            const text = await response.text();
+-            const errorJSON = safelyParseJSON(text);
+-
+-            if (!errorJSON) {
+-              throw new Error(text);
+-            }
+-
+-            if (errorJSON.statusCode === 429) {
+-              return {
+-                html: `<html>
+-                <body style="margin: 0; text-align: center">
+-                <div style="display: flex; align-items: center; justify-content: center; flex-direction: column; height: 100vh; padding: 0 60px">
+-                  <div style="color:red">Too many requests today,</br>please try again tomorrow!</div>
+-                  </br>
+-                  </br>
+-                  <div>You can also try <a href="${
+-                    import.meta.env.VITE_APP_PLUS_LP
+-                  }/plus?utm_source=excalidraw&utm_medium=app&utm_content=d2c" target="_blank" rel="noopener">Excalidraw+</a> to get more requests.</div>
+-                </div>
+-                </body>
+-                </html>`,
+-              };
+-            }
+-
+-            throw new Error(errorJSON.message || text);
+-          }
+-
+-          const reader = response.body?.getReader();
+-
+-          if (!reader) {
+-            throw new Error("Generation failed (invalid response)");
+-          }
+-
+-          let html = "";
+-          let streamError: Error | null = null;
+-
+-          for await (const data of parseSSEStream(reader)) {
+-            if (data === "[DONE]") {
+-              break;
+-            }
+-
+-            const chunk = safelyParseJSON(data) as StreamChunk | null;
+-
+-            if (!chunk) {
+-              continue;
+-            }
+-
+-            switch (chunk.type) {
+-              case "content": {
+-                if (chunk.delta) {
+-                  html += chunk.delta;
+-                  onPartial?.(html);
+-                }
+-                break;
+-              }
+-              case "error": {
+-                streamError = new Error(
+-                  chunk.error.message || "Generation failed",
+-                );
+-                break;
+-              }
+-              case "done": {
+-                break;
+-              }
+-            }
+-          }
+-
+-          if (streamError) {
+-            throw streamError;
+-          }
+-
+-          if (!html.trim()) {
+-            throw new Error("Generation failed (invalid response)");
+-          }
+-
+-          return {
+-            html,
+-          };
+-        }}
+-      />
+-
+-      <TTDDialog
+-        onTextSubmit={async (props) => {
+-          const { onChunk, onStreamCreated, signal, messages } = props;
+-
+-          const result = await TTDStreamFetch({
+-            url: `${
+-              import.meta.env.VITE_APP_AI_BACKEND
+-            }/v1/ai/text-to-diagram/chat-streaming`,
+-            messages,
+-            onChunk,
+-            onStreamCreated,
+-            extractRateLimits: true,
+-            signal,
+-          });
+-
+-          return result;
+-        }}
+-        persistenceAdapter={TTDIndexedDBAdapter}
+-      />
+-    </>
+-  );
+-};
+diff --git a/excalidraw-app/components/MermaidCache.tsx b/excalidraw-app/components/MermaidCache.tsx
+new file mode 100644
+index 000000000..d3e1e38cd
+--- /dev/null
++++ b/excalidraw-app/components/MermaidCache.tsx
+@@ -0,0 +1,20 @@
++import { useOnExcalidrawStateChange } from "@excalidraw/excalidraw";
++
++import { cacheMermaidChunks } from "../data/cacheMermaidChunks";
++
++/**
++ * Caches the (lazy-loaded) mermaid chunks once the TTD dialog is opened,
++ * so that Mermaid to Excalidraw keeps working offline.
++ */
++export const MermaidCache = () => {
++  useOnExcalidrawStateChange(
++    (appState) => appState.openDialog?.name === "ttd",
++    (isTTDDialogOpen) => {
++      if (isTTDDialogOpen) {
++        cacheMermaidChunks();
++      }
++    },
++  );
++
++  return null;
++};
+diff --git a/excalidraw-app/data/TTDStorage.ts b/excalidraw-app/data/TTDStorage.ts
+deleted file mode 100644
+index d7fe5d89e..000000000
+--- a/excalidraw-app/data/TTDStorage.ts
++++ /dev/null
+@@ -1,51 +0,0 @@
+-import { createStore, get, set } from "idb-keyval";
+-
+-import type { SavedChats } from "@excalidraw/excalidraw/components/TTDDialog/types";
+-
+-import { STORAGE_KEYS } from "../app_constants";
+-
+-/**
+- * IndexedDB adapter for TTD chat storage.
+- * Implements TTDPersistenceAdapter interface.
+- */
+-export class TTDIndexedDBAdapter {
+-  /** IndexedDB database name */
+-  private static idb_name = STORAGE_KEYS.IDB_TTD_CHATS;
+-  /** Store key for chat data */
+-  private static key = "ttdChats";
+-
+-  private static store = createStore(
+-    `${TTDIndexedDBAdapter.idb_name}-db`,
+-    `${TTDIndexedDBAdapter.idb_name}-store`,
+-  );
+-
+-  /**
+-   * Load saved chats from IndexedDB.
+-   * @returns Promise resolving to saved chats array (empty if none found)
+-   */
+-  static async loadChats(): Promise<SavedChats> {
+-    try {
+-      const data = await get<SavedChats>(
+-        TTDIndexedDBAdapter.key,
+-        TTDIndexedDBAdapter.store,
+-      );
+-      return data || [];
+-    } catch (error) {
+-      console.warn("Failed to load TTD chats from IndexedDB:", error);
+-      return [];
+-    }
+-  }
+-
+-  /**
+-   * Save chats to IndexedDB.
+-   * @param chats - The chats array to persist
+-   */
+-  static async saveChats(chats: SavedChats): Promise<void> {
+-    try {
+-      await set(TTDIndexedDBAdapter.key, chats, TTDIndexedDBAdapter.store);
+-    } catch (error) {
+-      console.warn("Failed to save TTD chats to IndexedDB:", error);
+-      throw error;
+-    }
+-  }
+-}
+diff --git a/packages/excalidraw/components/TTDDialog/TTDDialog.tsx b/packages/excalidraw/components/TTDDialog/TTDDialog.tsx
+index b2dae5be1..9ebcc4793 100644
+--- a/packages/excalidraw/components/TTDDialog/TTDDialog.tsx
++++ b/packages/excalidraw/components/TTDDialog/TTDDialog.tsx
+@@ -43,7 +43,10 @@ export const TTDDialog = (
+     return null;
+   }
+ 
+-  return <TTDDialogBase {...props} tab={appState.openDialog.tab} />;
++  // the fallback dialog has no text-to-diagram tab (i.e. no AI backend)
++  const tab = "__fallback" in props ? "mermaid" : appState.openDialog.tab;
++
++  return <TTDDialogBase {...props} tab={tab} />;
+ };
+ 
+ TTDDialog.WelcomeMessage = TTDWelcomeMessage;

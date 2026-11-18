@@ -1,0 +1,330 @@
+From f66dd8734bed607726096b4aa6c466dde892cb99 Mon Sep 17 00:00:00 2001
+From: Claude <claude@accounts.eddster.com>
+Date: Wed, 18 Nov 2026 18:03:26 +1100
+Subject: [PATCH 7/9] offline: remove social/external links
+
+---
+ excalidraw-app/App.tsx                        | 84 +------------------
+ excalidraw-app/components/AppMainMenu.tsx     |  1 -
+ .../components/BraveMeasureTextError.tsx      | 14 +---
+ packages/excalidraw/components/HelpDialog.tsx | 43 ----------
+ .../TTDDialog/MermaidToExcalidraw.tsx         | 14 +---
+ .../tests/__snapshots__/App.test.tsx.snap     | 18 ++--
+ .../MermaidToExcalidraw.test.tsx.snap         |  2 +-
+ public/404.html                               | 18 ----
+ 8 files changed, 14 insertions(+), 180 deletions(-)
+
+diff --git a/excalidraw-app/App.tsx b/excalidraw-app/App.tsx
+index eda0a1463..0eddd0fc0 100644
+--- a/excalidraw-app/App.tsx
++++ b/excalidraw-app/App.tsx
+@@ -37,14 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { loadFromBlob } from "@excalidraw/excalidraw/data/blob";
+ import { t } from "@excalidraw/excalidraw/i18n";
+ 
+-import {
+-  GithubIcon,
+-  XBrandIcon,
+-  DiscordIcon,
+-  usersIcon,
+-  share,
+-  youtubeIcon,
+-} from "@excalidraw/excalidraw/components/icons";
++import { usersIcon, share } from "@excalidraw/excalidraw/components/icons";
+ import { isElementLink } from "@excalidraw/element";
+ import {
+   bumpElementVersions,
+@@ -1087,81 +1080,6 @@ const ExcalidrawWrapper = () => {
+                 setShareDialogState({ isOpen: true, type: "share" });
+               },
+             },
+-            {
+-              label: "GitHub",
+-              icon: GithubIcon,
+-              category: DEFAULT_CATEGORIES.links,
+-              predicate: true,
+-              keywords: [
+-                "issues",
+-                "bugs",
+-                "requests",
+-                "report",
+-                "features",
+-                "social",
+-                "community",
+-              ],
+-              perform: () => {
+-                window.open(
+-                  "https://github.com/excalidraw/excalidraw",
+-                  "_blank",
+-                  "noopener noreferrer",
+-                );
+-              },
+-            },
+-            {
+-              label: t("labels.followUs"),
+-              icon: XBrandIcon,
+-              category: DEFAULT_CATEGORIES.links,
+-              predicate: true,
+-              keywords: ["twitter", "contact", "social", "community"],
+-              perform: () => {
+-                window.open(
+-                  "https://x.com/excalidraw",
+-                  "_blank",
+-                  "noopener noreferrer",
+-                );
+-              },
+-            },
+-            {
+-              label: t("labels.discordChat"),
+-              category: DEFAULT_CATEGORIES.links,
+-              predicate: true,
+-              icon: DiscordIcon,
+-              keywords: [
+-                "chat",
+-                "talk",
+-                "contact",
+-                "bugs",
+-                "requests",
+-                "report",
+-                "feedback",
+-                "suggestions",
+-                "social",
+-                "community",
+-              ],
+-              perform: () => {
+-                window.open(
+-                  "https://discord.gg/UexuTaE",
+-                  "_blank",
+-                  "noopener noreferrer",
+-                );
+-              },
+-            },
+-            {
+-              label: "YouTube",
+-              icon: youtubeIcon,
+-              category: DEFAULT_CATEGORIES.links,
+-              predicate: true,
+-              keywords: ["features", "tutorials", "howto", "help", "community"],
+-              perform: () => {
+-                window.open(
+-                  "https://youtube.com/@excalidraw",
+-                  "_blank",
+-                  "noopener noreferrer",
+-                );
+-              },
+-            },
+             {
+               label: t("labels.installPWA"),
+               category: DEFAULT_CATEGORIES.app,
+diff --git a/excalidraw-app/components/AppMainMenu.tsx b/excalidraw-app/components/AppMainMenu.tsx
+index c8326897f..c5914e2cc 100644
+--- a/excalidraw-app/components/AppMainMenu.tsx
++++ b/excalidraw-app/components/AppMainMenu.tsx
+@@ -34,7 +34,6 @@ export const AppMainMenu: React.FC<{
+       <MainMenu.DefaultItems.Help />
+       <MainMenu.DefaultItems.ClearCanvas />
+       <MainMenu.Separator />
+-      <MainMenu.DefaultItems.Socials />
+       {isDevEnv() && (
+         <MainMenu.Item
+           icon={eyeIcon}
+diff --git a/packages/excalidraw/components/BraveMeasureTextError.tsx b/packages/excalidraw/components/BraveMeasureTextError.tsx
+index 1932d7a29..a7ecae950 100644
+--- a/packages/excalidraw/components/BraveMeasureTextError.tsx
++++ b/packages/excalidraw/components/BraveMeasureTextError.tsx
+@@ -18,22 +18,14 @@ const BraveMeasureTextError = () => {
+       <p>
+         <Trans
+           i18nKey="errors.brave_measure_text_error.line3"
+-          link={(el) => (
+-            <a href="http://docs.excalidraw.com/docs/@excalidraw/excalidraw/faq#turning-off-aggresive-block-fingerprinting-in-brave-browser">
+-              {el}
+-            </a>
+-          )}
++          link={(el) => <span>{el}</span>}
+         />
+       </p>
+       <p>
+         <Trans
+           i18nKey="errors.brave_measure_text_error.line4"
+-          issueLink={(el) => (
+-            <a href="https://github.com/excalidraw/excalidraw/issues/new">
+-              {el}
+-            </a>
+-          )}
+-          discordLink={(el) => <a href="https://discord.gg/UexuTaE">{el}.</a>}
++          issueLink={(el) => <span>{el}</span>}
++          discordLink={(el) => <span>{el}.</span>}
+         />
+       </p>
+     </div>
+diff --git a/packages/excalidraw/components/HelpDialog.tsx b/packages/excalidraw/components/HelpDialog.tsx
+index 6773395ce..9e0e18382 100644
+--- a/packages/excalidraw/components/HelpDialog.tsx
++++ b/packages/excalidraw/components/HelpDialog.tsx
+@@ -12,53 +12,11 @@ import { getShortcutKey } from "../shortcut";
+ 
+ import { useExcalidrawActionManager } from "./App";
+ import { Dialog } from "./Dialog";
+-import { ExternalLinkIcon, GithubIcon, youtubeIcon } from "./icons";
+ 
+ import "./HelpDialog.scss";
+ 
+ import type { JSX } from "react";
+ 
+-const Header = () => (
+-  <div className="HelpDialog__header">
+-    <a
+-      className="HelpDialog__btn"
+-      href="https://docs.excalidraw.com"
+-      target="_blank"
+-      rel="noopener"
+-    >
+-      <div className="HelpDialog__link-icon">{ExternalLinkIcon}</div>
+-      {t("helpDialog.documentation")}
+-    </a>
+-    <a
+-      className="HelpDialog__btn"
+-      href="https://plus.excalidraw.com/blog"
+-      target="_blank"
+-      rel="noopener"
+-    >
+-      <div className="HelpDialog__link-icon">{ExternalLinkIcon}</div>
+-      {t("helpDialog.blog")}
+-    </a>
+-    <a
+-      className="HelpDialog__btn"
+-      href="https://github.com/excalidraw/excalidraw/issues"
+-      target="_blank"
+-      rel="noopener noreferrer"
+-    >
+-      <div className="HelpDialog__link-icon">{GithubIcon}</div>
+-      {t("helpDialog.github")}
+-    </a>
+-    <a
+-      className="HelpDialog__btn"
+-      href="https://youtube.com/@excalidraw"
+-      target="_blank"
+-      rel="noopener noreferrer"
+-    >
+-      <div className="HelpDialog__link-icon">{youtubeIcon}</div>
+-      YouTube
+-    </a>
+-  </div>
+-);
+-
+ const Section = (props: { title: string; children: React.ReactNode }) => (
+   <>
+     <h3>{props.title}</h3>
+@@ -140,7 +98,6 @@ export const HelpDialog = ({ onClose }: { onClose?: () => void }) => {
+         title={t("helpDialog.title")}
+         className={"HelpDialog"}
+       >
+-        <Header />
+         <Section title={t("helpDialog.shortcuts")}>
+           <ShortcutIsland
+             className="HelpDialog__island--tools"
+diff --git a/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx b/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx
+index e065463ab..ce4562c58 100644
+--- a/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx
++++ b/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx
+@@ -66,17 +66,9 @@ const getErrorMessage = (error: unknown): string => {
+   return "";
+ };
+ 
+-/** a link to the Mermaid syntax docs of a diagram type */
+-const mermaidSyntaxLink = (page: string) => (el: React.ReactNode) =>
+-  (
+-    <a
+-      href={`https://mermaid.js.org/syntax/${page}.html`}
+-      target="_blank"
+-      rel="noreferrer"
+-    >
+-      {el}
+-    </a>
+-  );
++/** the name of a Mermaid diagram type (plain text, docs are not linked offline) */
++const mermaidSyntaxLink = (_page: string) => (el: React.ReactNode) =>
++  <span>{el}</span>;
+ 
+ const MermaidToExcalidraw = ({
+   mermaidToExcalidrawLib,
+diff --git a/packages/excalidraw/tests/__snapshots__/App.test.tsx.snap b/packages/excalidraw/tests/__snapshots__/App.test.tsx.snap
+index 49c2fd0fc..57d6046be 100644
+--- a/packages/excalidraw/tests/__snapshots__/App.test.tsx.snap
++++ b/packages/excalidraw/tests/__snapshots__/App.test.tsx.snap
+@@ -24,27 +24,21 @@ exports[`Test <App/> > should show error modal when using brave and measureText
+   </p>
+   <p>
+     We strongly recommend disabling this setting. You can follow 
+-    <a
+-      href="http://docs.excalidraw.com/docs/@excalidraw/excalidraw/faq#turning-off-aggresive-block-fingerprinting-in-brave-browser"
+-    >
++    <span>
+       these steps
+-    </a>
++    </span>
+      on how to do so.
+   </p>
+   <p>
+     If disabling this setting doesn't fix the display of text elements, please open an 
+-    <a
+-      href="https://github.com/excalidraw/excalidraw/issues/new"
+-    >
++    <span>
+       issue
+-    </a>
++    </span>
+      on our GitHub, or write us on 
+-    <a
+-      href="https://discord.gg/UexuTaE"
+-    >
++    <span>
+       Discord
+       .
+-    </a>
++    </span>
+   </p>
+ </div>
+ `;
+diff --git a/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap b/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap
+index 038cc42f9..5cf90348a 100644
+--- a/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap
++++ b/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap
+@@ -1,6 +1,6 @@
+ // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+ 
+-exports[`Test <MermaidToExcalidraw/> > should open mermaid popup when active tool is mermaid 1`] = `"<div class="Modal Dialog ttd-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="Modal__background"></div><div class="Modal__content" style="--max-width: 1520px;" tabindex="0"><div class="Island"><div class="Dialog__content"><div dir="ltr" data-orientation="horizontal" class="ttd-dialog-tabs-root"><p class="dialog-mermaid-title">Mermaid to Excalidraw</p><div data-state="active" data-orientation="horizontal" role="tabpanel" aria-labelledby="radix-:r6:-trigger-mermaid" id="radix-:r6:-content-mermaid" tabindex="0" class="ttd-dialog-content"><div class="ttd-dialog-desc"><a href="https://mermaid.js.org/syntax/flowchart.html" target="_blank" rel="noreferrer">Flowcharts</a>, <a href="https://mermaid.js.org/syntax/sequenceDiagram.html" target="_blank" rel="noreferrer">Sequence</a>, <a href="https://mermaid.js.org/syntax/classDiagram.html" target="_blank" rel="noreferrer">Class</a>, <a href="https://mermaid.js.org/syntax/stateDiagram.html" target="_blank" rel="noreferrer">State</a> and <a href="https://mermaid.js.org/syntax/entityRelationshipDiagram.html" target="_blank" rel="noreferrer">Entity Relationship</a> diagrams, <a href="https://mermaid.js.org/syntax/gantt.html" target="_blank" rel="noreferrer">Gantt charts</a>, <a href="https://mermaid.js.org/syntax/quadrantChart.html" target="_blank" rel="noreferrer">Quadrant charts</a> and <a href="https://mermaid.js.org/syntax/timeline.html" target="_blank" rel="noreferrer">Timelines</a> are converted to Excalidraw elements. Other types are inserted as an image.</div><div class="ttd-dialog-panels"><div class="ttd-dialog-panel"><div class="ttd-dialog-panel-button-container invisible" style="justify-content: flex-start;"></div></div><div class="ttd-dialog-panel"><div class="ttd-dialog-output-wrapper "><div class="ttd-dialog-output-canvas-container"><div class="ttd-dialog-output-canvas-content"><canvas width="90" height="158" dir="ltr"></canvas></div></div></div><div class="ttd-dialog-panel-button-container" style="justify-content: flex-start;"><button type="button" class="excalidraw-button ttd-dialog-panel-button"><div class="">Insert<span><svg aria-hidden="true" focusable="false" role="img" viewBox="0 0 20 20" class="" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.25"><path d="M4.16602 10H15.8327"></path><path d="M12.5 13.3333L15.8333 10"></path><path d="M12.5 6.66666L15.8333 9.99999"></path></g></svg></span></div></button><div class="ttd-dialog-submit-shortcut"><div class="ttd-dialog-submit-shortcut__key">Ctrl</div><div class="ttd-dialog-submit-shortcut__key">Enter</div></div></div></div></div></div></div></div></div></div></div>"`;
++exports[`Test <MermaidToExcalidraw/> > should open mermaid popup when active tool is mermaid 1`] = `"<div class="Modal Dialog ttd-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="Modal__background"></div><div class="Modal__content" style="--max-width: 1520px;" tabindex="0"><div class="Island"><div class="Dialog__content"><div dir="ltr" data-orientation="horizontal" class="ttd-dialog-tabs-root"><p class="dialog-mermaid-title">Mermaid to Excalidraw</p><div data-state="active" data-orientation="horizontal" role="tabpanel" aria-labelledby="radix-:r6:-trigger-mermaid" id="radix-:r6:-content-mermaid" tabindex="0" class="ttd-dialog-content"><div class="ttd-dialog-desc"><span>Flowcharts</span>, <span>Sequence</span>, <span>Class</span>, <span>State</span> and <span>Entity Relationship</span> diagrams, <span>Gantt charts</span>, <span>Quadrant charts</span> and <span>Timelines</span> are converted to Excalidraw elements. Other types are inserted as an image.</div><div class="ttd-dialog-panels"><div class="ttd-dialog-panel"><div class="ttd-dialog-panel-button-container invisible" style="justify-content: flex-start;"></div></div><div class="ttd-dialog-panel"><div class="ttd-dialog-output-wrapper "><div class="ttd-dialog-output-canvas-container"><div class="ttd-dialog-output-canvas-content"><canvas width="90" height="158" dir="ltr"></canvas></div></div></div><div class="ttd-dialog-panel-button-container" style="justify-content: flex-start;"><button type="button" class="excalidraw-button ttd-dialog-panel-button"><div class="">Insert<span><svg aria-hidden="true" focusable="false" role="img" viewBox="0 0 20 20" class="" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.25"><path d="M4.16602 10H15.8327"></path><path d="M12.5 13.3333L15.8333 10"></path><path d="M12.5 6.66666L15.8333 9.99999"></path></g></svg></span></div></button><div class="ttd-dialog-submit-shortcut"><div class="ttd-dialog-submit-shortcut__key">Ctrl</div><div class="ttd-dialog-submit-shortcut__key">Enter</div></div></div></div></div></div></div></div></div></div></div>"`;
+ 
+ exports[`Test <MermaidToExcalidraw/> > should show error in preview when mermaid library throws error 1`] = `
+ "flowchart TD
+diff --git a/public/404.html b/public/404.html
+index 95e317c96..317f3d3d3 100644
+--- a/public/404.html
++++ b/public/404.html
+@@ -318,24 +318,6 @@
+       </h1>
+       <p>There is nothing at this address.</p>
+       <a class="button" href="/">Open Excalidraw</a>
+-      <nav aria-label="More from Excalidraw">
+-        <a
+-          href="https://plus.excalidraw.com?utm_source=excalidraw&amp;utm_medium=app&amp;utm_content=404"
+-          >Excalidraw+</a
+-        >
+-        <span aria-hidden="true">•</span>
+-        <a
+-          href="https://plus.excalidraw.com/docs?utm_source=excalidraw&amp;utm_medium=app&amp;utm_content=404"
+-          >Documentation</a
+-        >
+-        <span aria-hidden="true">•</span>
+-        <a
+-          href="https://plus.excalidraw.com/docs/mcp?utm_source=excalidraw&amp;utm_medium=app&amp;utm_content=404"
+-          >MCP</a
+-        >
+-        <span aria-hidden="true">•</span>
+-        <a href="https://github.com/excalidraw/cli">CLI</a>
+-      </nav>
+     </main>
+   </body>
+ </html>
