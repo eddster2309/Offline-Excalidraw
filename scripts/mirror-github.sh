@@ -5,12 +5,12 @@
 # GitHub SHAs and repeat runs push nothing new.
 # Env:
 #   GITHUB_TOKEN        token with contents:write on GITHUB_REPO (required)
-#   GITHUB_REPO         owner/name (default eddster2309/excalidraw-offline)
+#   GITHUB_REPO         owner/name (default eddster2309/Offline-Excalidraw)
 #   GITHUB_NAME / GITHUB_EMAIL   identity (default the eddster2309 noreply address)
 #   MIRROR_BRANCH       branch to mirror (default CI_DEFAULT_BRANCH, else main)
 #   DRY_RUN=1           rewrite but don't push
 set -eu
-: "${GITHUB_REPO:=eddster2309/excalidraw-offline}"
+: "${GITHUB_REPO:=eddster2309/Offline-Excalidraw}"
 : "${GITHUB_NAME:=eddster2309}"
 : "${GITHUB_EMAIL:=16095534+eddster2309@users.noreply.github.com}"
 BRANCH="${MIRROR_BRANCH:-${CI_DEFAULT_BRANCH:-main}}"

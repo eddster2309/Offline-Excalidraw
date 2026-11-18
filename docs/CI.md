@@ -35,7 +35,7 @@ github.com / registry.yarnpkg.com directly.
 
 Optional:
 
-- `GITHUB_TOKEN` (masked, protected): enables `mirror:github`. A fine-grained token with *Contents: read and write* on the GitHub repo. `GITHUB_REPO` (default `eddster2309/excalidraw-offline`), `GITHUB_NAME` and `GITHUB_EMAIL` (default the eddster2309 noreply address) override the target and identity. The rewrite keeps dates and messages, so it is deterministic: the same GitLab history always gives the same GitHub SHAs. The push is `--force`, so GitHub must not be committed to directly. Try it locally with `DRY_RUN=1 MIRROR_BRANCH=main scripts/mirror-github.sh`.
+- `GITHUB_TOKEN` (masked, protected): enables `mirror:github`. A fine-grained token with *Contents: read and write* on the GitHub repo. `GITHUB_REPO` (default `eddster2309/Offline-Excalidraw`), `GITHUB_NAME` and `GITHUB_EMAIL` (default the eddster2309 noreply address) override the target and identity. The rewrite keeps dates and messages, so it is deterministic: the same GitLab history always gives the same GitHub SHAs. The push is `--force`, so GitHub must not be committed to directly. Try it locally with `DRY_RUN=1 MIRROR_BRANCH=main scripts/mirror-github.sh`.
 - `UPSTREAM_REF`, `LIBRARIES_REF`: branch/tag/sha to test instead of the pinned commits (drift job only).
 - `PLAYWRIGHT_DOWNLOAD_HOST`: where `playwright install` fetches Chromium from (see below).
 - `VITEST_MAX_WORKERS`: unit test workers. `.gitlab-ci.yml` sets `2`: the runner pods have no CPU request or limit, see all 12 cores of a node but get a fraction of them, and more workers push tests past their timeouts. Unset, `ci-test.sh` uses the container's CPU quota, else `nproc`.
