@@ -19,7 +19,8 @@ variables:
   stage: test
   image: $HARBOR_DOCKER/library/node:22-bookworm
   tags: [jack-cbr]
-  timeout: 1h
+  # the runner nodes are slow (see VITEST_MAX_WORKERS); a full run takes over an hour
+  timeout: 2h
   variables:
     # Everything cache-like lives inside the project dir so GitLab can cache it.
     CACHE_DIR: $CI_PROJECT_DIR/.cache
