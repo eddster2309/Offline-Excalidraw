@@ -1,0 +1,30 @@
+excalidraw-offline
+Copyright (c) 2026 excalidraw-offline contributors
+Licensed under the MIT License (see LICENSE).
+
+This repository contains patches against, and builds images from, the
+following third-party projects. Their code is not vendored here; it is
+fetched at the pinned commits at build time and remains under its own
+license.
+
+Excalidraw
+  https://github.com/excalidraw/excalidraw (commit in UPSTREAM_COMMIT)
+  Copyright (c) 2020 Excalidraw
+  MIT License
+  The files in patches/ are modifications of Excalidraw source files.
+
+Excalidraw Libraries
+  https://github.com/excalidraw/excalidraw-libraries (commit in LIBRARIES_COMMIT)
+  Copyright (c) 2020 Excalidraw
+  MIT License
+  The files in patches-libraries/ are modifications of that site. The
+  libraries in its catalog are published by their individual authors
+  under the MIT License (as stated on the site); authors are listed in
+  libraries.json.
+
+The collaboration relay in server/src/server.js follows the socket.io
+protocol of excalidraw-room (https://github.com/excalidraw/excalidraw-room,
+MIT License, Copyright (c) 2020 Excalidraw).
+
+Third-party npm dependencies of server/ and e2e/ are listed in their
+package-lock.json files and carry their own licenses.

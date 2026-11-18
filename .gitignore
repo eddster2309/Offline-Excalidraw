@@ -1,0 +1,12 @@
+upstream/
+node_modules/
+*.log
+test-results/
+playwright-report/
+libraries-upstream/
+work/
+dist/
+reports/
+.cache/
+.docker/
+.env
