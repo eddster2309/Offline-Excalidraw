@@ -1,6 +1,6 @@
 # Pipeline: test that the patch series apply and the result works, then build and
 # push the image to the GitLab container registry. See docs/CI.md.
-stages: [test, build]
+stages: [test, build, mirror]
 
 workflow:
   rules:
@@ -77,6 +77,25 @@ test:upstream-drift:
       - reports/test-results
     reports:
       junit: reports/e2e-junit.xml
+
+# ---- GitHub mirror -----------------------------------------------------------
+# Default branch + tags to GitHub, authors rewritten to the GitHub identity
+# (scripts/mirror-github.sh). Runs after the image is built, so only tested
+# history is mirrored. Needs the masked GITHUB_TOKEN variable.
+mirror:github:
+  stage: mirror
+  image:
+    name: $HARBOR_DOCKER/alpine/git:latest
+    entrypoint: [""]     # the image's entrypoint is git itself
+  tags: [jack-cbr]
+  needs: [build]
+  variables:
+    GIT_DEPTH: "0"        # the rewrite needs the full history
+    GIT_STRATEGY: clone
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITHUB_TOKEN
+  script:
+    - sh scripts/mirror-github.sh
 
 # ---- image ------------------------------------------------------------------
 # docker-build is rootless BuildKit; image goes to the GitLab registry (the
