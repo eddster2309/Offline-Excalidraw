@@ -1,0 +1,11 @@
+upstream
+libraries-upstream
+**/node_modules
+e2e
+server/data
+.git
+.cache
+.docker
+work
+reports
+*.log

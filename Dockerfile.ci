@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# Runtime-only image for CI: packages the app and library site that the
+# `test:patches` job already built and tested (dist/app, dist/libraries), so the
+# pushed image is exactly the tested build. Same runtime as the main Dockerfile's
+# final stage. For a standalone build that compiles everything, use Dockerfile.
+ARG BASE_REGISTRY=docker.io
+FROM ${BASE_REGISTRY}/library/node:22-alpine
+ARG npm_config_registry
+ENV NODE_ENV=production PORT=3000 STATIC_DIR=/app/public LIBRARIES_DIR=/app/libraries DATA_DIR=/data
+WORKDIR /app
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --omit=dev
+COPY server/src ./src
+COPY dist/app /app/public
+COPY dist/libraries /app/libraries
+RUN mkdir -p /data && chown node:node /data
+VOLUME /data
+EXPOSE 3000
+USER node
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1
+CMD ["node", "src/server.js"]

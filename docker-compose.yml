@@ -1,0 +1,61 @@
+services:
+  excalidraw:
+    build: .
+    image: excalidraw-offline
+    # build:
+    #   context: .
+    #   args:
+    #     INCLUDE_LIBRARIES: "false"   # omit the offline library site
+    ports:
+      - "3000:3000"
+    volumes:
+      - excalidraw-data:/data
+    environment:
+      # e.g. BANNER_TEXT=QA docker compose up -d; unset = no banner
+      BANNER_TEXT: ${BANNER_TEXT:-}
+      # always (default): permanent; sending: only while a live session is active
+      BANNER_MODE: ${BANNER_MODE:-always}
+      BANNER_COLOR: ${BANNER_COLOR:-#8b0000}
+      BANNER_TEXT_COLOR: ${BANNER_TEXT_COLOR:-#ffffff}
+      # note in the share dialog; **bold**, [red]coloured[/], "\n" = newline
+      SHARE_NOTE: ${SHARE_NOTE:-}
+      # true: no share links, no saved rooms, no library publishing; room images in memory only
+      DISABLE_PERSISTENCE: ${DISABLE_PERSISTENCE:-false}
+      # true: no live collaboration (no socket.io, no rooms); share links stay unless persistence is off too
+      DISABLE_COLLABORATION: ${DISABLE_COLLABORATION:-false}
+    restart: unless-stopped
+
+  # --- Runtime configuration example: one image, two environments (no rebuild).
+  #     docker compose --profile envs up        # QA on :3001, PROD on :3002
+  excalidraw-qa:
+    profiles: ["envs"]
+    image: excalidraw-offline
+    ports:
+      - "3001:3000"
+    environment:
+      BANNER_TEXT: QA
+      SHARE_NOTE: "**[darkred]QA environment[/]** - test data only\\nDo not share client data"
+      BANNER_COLOR: "#b45309"          # default is dark red (#8b0000)
+      DISABLE_PERSISTENCE: "true"      # no share links, no scene saving; nothing is written
+      MEMORY_FILES_MAX_MB: "128"
+      # USERNAME_HEADER: X-Forwarded-User   # only behind a proxy that sets/strips it
+    read_only: true                    # possible because nothing is persisted
+    restart: unless-stopped
+
+  excalidraw-prod:
+    profiles: ["envs"]
+    image: excalidraw-offline
+    ports:
+      - "3002:3000"
+    volumes:
+      - excalidraw-prod-data:/data
+    environment:
+      BANNER_TEXT: PROD
+      BANNER_MODE: sending             # banner only while a live session is active
+      SHARE_NOTE: "Sessions are visible to everyone with the link.\\n**[#c92a2a]No confidential data.[/]**"
+      # USERNAME_HEADER: X-Forwarded-User
+    restart: unless-stopped
+
+volumes:
+  excalidraw-data:
+  excalidraw-prod-data:
