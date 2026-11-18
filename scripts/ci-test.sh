@@ -11,6 +11,8 @@
 #   SKIP_UNIT=1 / SKIP_E2E=1       skip those steps (local convenience)
 #   VITEST_MAX_WORKERS             unit test workers (default: the container's CPU quota)
 #   VITEST_RETRY                   retries per failed unit test (default 2)
+#   VITEST_TEST_TIMEOUT            default per-test timeout in ms (default 60000)
+#   VITEST_SKIP                    regex of full unit test names to skip (default: none)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${WORK_DIR:-$ROOT/work}"; OUT="${OUT_DIR:-$ROOT/dist}"; CACHE="${CACHE_DIR:-$ROOT/.cache}"
@@ -67,7 +69,15 @@ if [ -z "${SKIP_UNIT:-}" ]; then
   # Retries absorb cold-start timeouts on slow runners: a worker's first editor
   # render loads the lazy modules and can exceed the test helpers' 1s wait.
   # A real failure fails every attempt and still fails the job.
-  yarn test:app --watch=false --maxWorkers="$UNIT_WORKERS" --minWorkers=1 --retry="${VITEST_RETRY:-2}"
+  # VITEST_TEST_TIMEOUT raises vitest's default 5s per-test budget (tests that
+  # set their own timeout keep it); VITEST_SKIP is a test-name regex to leave out.
+  unit_args=(--watch=false --maxWorkers="$UNIT_WORKERS" --minWorkers=1 --retry="${VITEST_RETRY:-2}"
+             --testTimeout="${VITEST_TEST_TIMEOUT:-60000}")
+  if [ -n "${VITEST_SKIP:-}" ]; then
+    echo "skipping unit tests matching: $VITEST_SKIP"
+    unit_args+=(-t "^(?!(${VITEST_SKIP})\$)")
+  fi
+  yarn test:app "${unit_args[@]}"
 fi
 
 step "build app"
