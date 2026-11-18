@@ -9,12 +9,28 @@
 #   PLAYWRIGHT_DOWNLOAD_HOST       browser CDN override (default: playwright's own CDN)
 #   WORK_DIR (default ./work)  OUT_DIR (default ./dist)  CACHE_DIR (default ./.cache)
 #   SKIP_UNIT=1 / SKIP_E2E=1       skip those steps (local convenience)
+#   VITEST_MAX_WORKERS             unit test workers (default: the container's CPU quota)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${WORK_DIR:-$ROOT/work}"; OUT="${OUT_DIR:-$ROOT/dist}"; CACHE="${CACHE_DIR:-$ROOT/.cache}"
 UP="$WORK/upstream"; LIB="$WORK/libraries"
 export YARN_CACHE_FOLDER="$CACHE/yarn" npm_config_cache="$CACHE/npm" PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$CACHE/ms-playwright}"
 export CI=true GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@localhost GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@localhost
+# CPUs this container may actually use: the cgroup quota (v2, then v1), else
+# nproc. vitest sizes its worker pool from the host's cores, which inside a
+# CPU-limited pod oversubscribes it until tests hit their timeouts.
+cgroup_cpus() {
+  local quota period
+  if read -r quota period 2>/dev/null < /sys/fs/cgroup/cpu.max && [ "$quota" != max ]; then :
+  elif quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null) && [ "$quota" -gt 0 ] 2>/dev/null; then
+    period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)
+  else
+    nproc; return
+  fi
+  local n=$(( (quota + period - 1) / period ))
+  echo $(( n < 1 ? 1 : n ))
+}
+UNIT_WORKERS="${VITEST_MAX_WORKERS:-$(cgroup_cpus)}"
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
 step "node $(node -v), yarn $(yarn -v), npm $(npm -v); DLCACHE_URL=${DLCACHE_URL:-<unset>} npm_config_registry=${npm_config_registry:-<unset>}"
@@ -41,7 +57,10 @@ step "typecheck / lint / format"
 yarn test:typecheck
 yarn test:code
 yarn test:other
-if [ -z "${SKIP_UNIT:-}" ]; then step "unit tests"; yarn test:app --watch=false; fi
+if [ -z "${SKIP_UNIT:-}" ]; then
+  step "unit tests (${UNIT_WORKERS} workers)"
+  yarn test:app --watch=false --maxWorkers="$UNIT_WORKERS" --minWorkers=1
+fi
 
 step "build app"
 yarn build:app:docker
