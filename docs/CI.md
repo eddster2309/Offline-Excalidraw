@@ -36,7 +36,10 @@ Optional:
 
 - `UPSTREAM_REF`, `LIBRARIES_REF`: branch/tag/sha to test instead of the pinned commits (drift job only).
 - `PLAYWRIGHT_DOWNLOAD_HOST`: where `playwright install` fetches Chromium from (see below).
-- `VITEST_MAX_WORKERS`: unit test workers. `.gitlab-ci.yml` sets `4` because the runner pods have no CPU limit and see every core of a shared node (one worker per core made tests time out). Unset, `ci-test.sh` uses the container's CPU quota, else `nproc`.
+- `VITEST_MAX_WORKERS`: unit test workers. `.gitlab-ci.yml` sets `2`: the runner pods have no CPU request or limit, see all 12 cores of a node but get a fraction of them, and more workers push tests past their timeouts. Unset, `ci-test.sh` uses the container's CPU quota, else `nproc`.
+- `VITEST_RETRY`: retries per failed unit test (default `2`), for cold-start timeouts on slow runners.
+
+The job log prints the runner's capacity (`cpus: nproc=… quota=… bench=…ms`). For faster, steadier pipelines give the Kubernetes runner a CPU request (or allow `KUBERNETES_CPU_REQUEST` overrides via `cpu_request_overwrite_max_allowed`) so the pod is not best-effort.
 
 The registry cache and image repository need no setup: the job token pushes to the project's own registry.
 

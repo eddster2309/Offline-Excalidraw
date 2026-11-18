@@ -23,11 +23,11 @@ variables:
   variables:
     # Everything cache-like lives inside the project dir so GitLab can cache it.
     CACHE_DIR: $CI_PROJECT_DIR/.cache
-    # The runner pods have no CPU limit, so the pod sees all of the node's cores
-    # and vitest would start one worker per core while sharing the node with
-    # other jobs; 12 workers ran 10x slower and hit test timeouts. 4 matches
-    # upstream's CI (4-vCPU GitHub runners).
-    VITEST_MAX_WORKERS: "4"
+    # The runner pods have no CPU request or limit: the pod sees all 12 cores
+    # but gets a fraction of them (tsc/eslint run ~10x slower than on 4 real
+    # CPUs). One worker per visible core, or even 4, starves the tests into
+    # their timeouts; 2 workers plus retries (ci-test.sh) keep them within.
+    VITEST_MAX_WORKERS: "2"
   cache:
     - key: {prefix: yarn, files: [UPSTREAM_COMMIT]}
       paths: [.cache/yarn]

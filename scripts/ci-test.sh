@@ -10,6 +10,7 @@
 #   WORK_DIR (default ./work)  OUT_DIR (default ./dist)  CACHE_DIR (default ./.cache)
 #   SKIP_UNIT=1 / SKIP_E2E=1       skip those steps (local convenience)
 #   VITEST_MAX_WORKERS             unit test workers (default: the container's CPU quota)
+#   VITEST_RETRY                   retries per failed unit test (default 2)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${WORK_DIR:-$ROOT/work}"; OUT="${OUT_DIR:-$ROOT/dist}"; CACHE="${CACHE_DIR:-$ROOT/.cache}"
@@ -34,6 +35,10 @@ UNIT_WORKERS="${VITEST_MAX_WORKERS:-$(cgroup_cpus)}"
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
 step "node $(node -v), yarn $(yarn -v), npm $(npm -v); DLCACHE_URL=${DLCACHE_URL:-<unset>} npm_config_registry=${npm_config_registry:-<unset>}"
+# runner capacity, for comparing slow pipelines: visible cores, cgroup quota,
+# and a fixed single-threaded workload (~0.5s on a fast desktop core)
+echo "cpus: nproc=$(nproc) quota=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo n/a) unit_workers=$UNIT_WORKERS" \
+  "bench=$(node -e 'const t=Date.now();let x=0;for(let i=0;i<3e8;i++)x+=i%7;console.log((Date.now()-t)+"ms")')"
 rm -rf "$WORK" "$OUT"; mkdir -p "$WORK" "$OUT"
 
 step "apply upstream patches (${UPSTREAM_REF:-pinned $(cat "$ROOT/UPSTREAM_COMMIT")})"
@@ -58,8 +63,11 @@ yarn test:typecheck
 yarn test:code
 yarn test:other
 if [ -z "${SKIP_UNIT:-}" ]; then
-  step "unit tests (${UNIT_WORKERS} workers)"
-  yarn test:app --watch=false --maxWorkers="$UNIT_WORKERS" --minWorkers=1
+  step "unit tests (${UNIT_WORKERS} workers, ${VITEST_RETRY:-2} retries)"
+  # Retries absorb cold-start timeouts on slow runners: a worker's first editor
+  # render loads the lazy modules and can exceed the test helpers' 1s wait.
+  # A real failure fails every attempt and still fails the job.
+  yarn test:app --watch=false --maxWorkers="$UNIT_WORKERS" --minWorkers=1 --retry="${VITEST_RETRY:-2}"
 fi
 
 step "build app"
