@@ -1,0 +1,31 @@
+# Test environment for USERNAME_HEADER: nginx with basic auth in front of
+# excalidraw-offline. Open http://localhost:3100 and log in as alice, bob or
+# carol (password = username). See README.md in this directory.
+#
+#   docker compose -f examples/auth-proxy/docker-compose.yml up -d
+#
+# Uses the excalidraw-offline image built by the top-level compose file
+# (`docker compose build` in the repo root first if you don't have it).
+name: excalidraw-auth-test
+
+services:
+  excalidraw:
+    image: excalidraw-offline
+    # not published: only reachable through the proxy
+    environment:
+      USERNAME_HEADER: X-Forwarded-User
+      USERNAME_HEADER_LOCK: ${USERNAME_HEADER_LOCK:-true}
+      BANNER_TEXT: AUTH TEST
+      DISABLE_PERSISTENCE: "true"
+    read_only: true
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:1.27.2-alpine
+    depends_on: [excalidraw]
+    ports:
+      - "127.0.0.1:3100:8080"   # test users with weak passwords: local only
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./htpasswd:/etc/nginx/htpasswd:ro
+    restart: unless-stopped
